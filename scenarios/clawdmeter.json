@@ -1,0 +1,10 @@
+{
+  "target": "clawdmeter",
+  "steps": [
+    { "cmd": "screenshot", "out": "01-waiting.png" },
+    { "cmd": "snapshot", "data": {"lim":1,"s5":42,"s5r":180,"s7":10,"s7r":6000,"ctx":55,"cost":1.5,"model":"opus"} },
+    { "cmd": "screenshot", "out": "02-limits.png" },
+    { "cmd": "battery", "pct": 20 },
+    { "cmd": "screenshot", "out": "03-battery.png" }
+  ]
+}

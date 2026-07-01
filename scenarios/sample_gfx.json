@@ -1,0 +1,7 @@
+{
+  "target": "sample_gfx",
+  "steps": [
+    { "cmd": "steps", "n": 60 },
+    { "cmd": "screenshot", "out": "sample_gfx.png" }
+  ]
+}

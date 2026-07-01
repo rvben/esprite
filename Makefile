@@ -1,7 +1,7 @@
-BUILD ?= build
+BUILD  ?= build
 TARGET ?= clawdmeter
 
-.PHONY: configure build test screenshot goldens clean
+.PHONY: configure build test screenshot scenario goldens clean
 
 configure:
 	cmake -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Debug
@@ -9,15 +9,23 @@ configure:
 build: configure
 	cmake --build $(BUILD) -j
 
-test: configure
-	cmake --build $(BUILD) --target sim_tests -j
-	ctest --test-dir $(BUILD) --output-on-failure
+# Unit tests (sim_tests) and target integration tests (sim_itests).
+test: build
+	ctest --test-dir $(BUILD) --output-on-failure --timeout 90
 
+# One-shot screenshot of a target: make screenshot TARGET=sample_gfx
 screenshot: build
 	$(BUILD)/esp32sim screenshot --target $(TARGET) $(TARGET).png
+	@echo "wrote $(TARGET).png"
 
-goldens: build
+# Run a target's JSON scenario (emits PNGs into the current directory).
+scenario: build
 	$(BUILD)/esp32sim scenario scenarios/$(TARGET).json
+
+# Regenerate golden screenshots for a target into goldens/.
+goldens: build
+	mkdir -p goldens
+	cd goldens && ../$(BUILD)/esp32sim scenario ../scenarios/$(TARGET).json
 
 clean:
 	rm -rf $(BUILD)
