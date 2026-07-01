@@ -46,6 +46,27 @@ add_library(core STATIC
 target_include_directories(core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core)
 target_link_libraries(core PUBLIC shims)
 
+# LVGL 9.2 built from source with the sim lv_conf.h.
+FetchContent_Declare(lvgl
+    GIT_REPOSITORY https://github.com/lvgl/lvgl.git
+    GIT_TAG v9.2.2
+    GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(lvgl)
+target_include_directories(lvgl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/lvgl)
+target_compile_definitions(lvgl PUBLIC LV_CONF_INCLUDE_SIMPLE)
+
+# LVGL globs its NEON .S sources unconditionally. We use the NONE asm path, and
+# Apple's assembler cannot process those files (they pull in C headers), so drop
+# every .S source from the target.
+get_target_property(_lvgl_srcs lvgl SOURCES)
+list(FILTER _lvgl_srcs EXCLUDE REGEX "\\.S$")
+set_target_properties(lvgl PROPERTIES SOURCES "${_lvgl_srcs}")
+
+# LVGL-to-framebuffer glue for LVGL-based targets.
+add_library(lvgl_glue STATIC peripherals/lvgl/lvgl_display.cpp)
+target_include_directories(lvgl_glue PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/lvgl)
+target_link_libraries(lvgl_glue PUBLIC lvgl peripherals)
+
 # Unit-test executable. Grows as components are added.
 add_executable(sim_tests
     tests/test_smoke.cpp
@@ -57,8 +78,9 @@ add_executable(sim_tests
     tests/test_framebuffer.cpp
     tests/test_screenshot.cpp
     tests/test_target.cpp
+    tests/test_lvgl_smoke.cpp
 )
-target_link_libraries(sim_tests PRIVATE peripherals core)
+target_link_libraries(sim_tests PRIVATE core lvgl_glue)
 
 enable_testing()
 add_test(NAME sim_tests COMMAND sim_tests)
