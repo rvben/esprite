@@ -70,6 +70,14 @@ public:
     unsigned char concat(const char* s) { s_ += (s ? s : ""); return 1; }
     unsigned char concat(char c) { s_ += c; return 1; }
     String& operator+=(const char* s) { s_ += (s ? s : ""); return *this; }
+    // Parsing helpers used by firmware request handlers.
+    bool startsWith(const char* p) const { return p && s_.rfind(p, 0) == 0; }
+    int  indexOf(char c) const { auto q = s_.find(c); return q == std::string::npos ? -1 : (int)q; }
+    int  indexOf(const char* sub) const {
+        if (!sub) return -1;
+        auto q = s_.find(sub);
+        return q == std::string::npos ? -1 : (int)q;
+    }
     // Lets ArduinoJson and other APIs consume a String as a C string.
     operator const char*() const { return s_.c_str(); }
 private:
