@@ -12,17 +12,49 @@ if(NOT EXISTS ${CM}/main.cpp)
     return()
 endif()
 
+# Simulated firmware sources. The firmware evolves in its own repo; when it adds
+# a file, the drift check below turns the otherwise-cryptic linker error into a
+# configure-time warning naming the file.
+set(CLAWDMETER_SIM_SOURCES
+    main.cpp
+    app_wifi.cpp
+    wifi_link.cpp
+    webconfig.cpp
+    ota.cpp
+    ui.cpp
+    splash.cpp
+    idle.cpp
+    usage_rate.cpp
+    limits_projection.cpp
+    brightness.cpp
+)
+
+# Firmware sources deliberately NOT simulated (no BLE/audio shims; the sim's
+# data path is HTTP). A new firmware file belongs in exactly one of these lists.
+set(CLAWDMETER_UNSIMULATED_SOURCES
+    app_buddy.cpp
+    ble.cpp
+    chime.cpp
+    protocol.cpp
+    es8311.c
+)
+
+file(GLOB _cm_present CONFIGURE_DEPENDS ${CM}/*.cpp ${CM}/*.c)
+foreach(_f ${_cm_present})
+    get_filename_component(_name ${_f} NAME)
+    if(NOT _name IN_LIST CLAWDMETER_SIM_SOURCES
+       AND NOT _name IN_LIST CLAWDMETER_UNSIMULATED_SOURCES
+       AND NOT _name MATCHES "^font_.*\\.c$")
+        message(WARNING "Clawdmeter gained ${_name}; add it to CLAWDMETER_SIM_SOURCES "
+                        "(links against the shims) or CLAWDMETER_UNSIMULATED_SOURCES "
+                        "in firmwares/clawdmeter/CMakeLists.txt")
+    endif()
+endforeach()
+
+list(TRANSFORM CLAWDMETER_SIM_SOURCES PREPEND ${CM}/)
+
 add_library(clawdmeter_fw STATIC
-    ${CM}/main.cpp
-    ${CM}/app_wifi.cpp
-    ${CM}/wifi_link.cpp
-    ${CM}/webconfig.cpp
-    ${CM}/ota.cpp
-    ${CM}/ui.cpp
-    ${CM}/splash.cpp
-    ${CM}/idle.cpp
-    ${CM}/usage_rate.cpp
-    ${CM}/brightness.cpp
+    ${CLAWDMETER_SIM_SOURCES}
     # Pre-compiled LVGL fonts.
     ${CM}/font_mono_18.c
     ${CM}/font_mono_32.c
