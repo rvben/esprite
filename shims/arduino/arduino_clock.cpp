@@ -18,4 +18,5 @@ void pinMode(int, int) {}
 void digitalWrite(int pin, int level) { sim_gpio_set(pin, level); }
 int  digitalRead(int pin) { return sim_gpio_get(pin); }
 
-TwoWire Wire;
+TwoWire  Wire;
+EspClass ESP;

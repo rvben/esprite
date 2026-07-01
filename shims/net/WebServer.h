@@ -20,14 +20,20 @@ public:
     void handleClient();
     void send(int code, const char* type, const String& body);
     void send(int code, const char* type, const char* body) { send(code, type, String(body)); }
+    void send_P(int code, const char* type, const char* body) { send(code, type, String(body)); }
     bool hasArg(const char* name);
     String arg(const char* name);
+    void collectHeaders(const char** names, size_t count);  // sim collects all; no-op list
+    bool hasHeader(const char* name);
+    String header(const char* name);
+    void stop();
     int boundPort() const { return bound_port_; }
 private:
     int port_;
     int bound_port_ = 0;
     int listen_fd_ = -1;
     std::map<std::string, Handler> get_, post_;
+    std::map<std::string, std::string> headers_;   // current request headers (lowercased keys)
     std::string body_;
     int client_fd_ = -1;
 };

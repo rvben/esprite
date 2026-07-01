@@ -15,6 +15,11 @@ public:
         (void)ap_ssid;
         return true;
     }
+    void resetSettings() {}
+    bool startConfigPortal(const char* = nullptr) {
+        if (ap_cb_) ap_cb_(this);
+        return true;
+    }
 private:
     ApCb ap_cb_ = nullptr;
 };

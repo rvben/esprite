@@ -65,9 +65,23 @@ public:
     const char* c_str() const { return s_.c_str(); }
     size_t length() const { return s_.size(); }
     String operator+(const String& o) const { return String(s_ + o.s_); }
+    // ArduinoJson's String writer appends via concat(); return truthy on success.
+    unsigned char concat(const char* s) { s_ += (s ? s : ""); return 1; }
+    unsigned char concat(char c) { s_ += c; return 1; }
+    String& operator+=(const char* s) { s_ += (s ? s : ""); return *this; }
+    // Lets ArduinoJson and other APIs consume a String as a C string.
+    operator const char*() const { return s_.c_str(); }
 private:
     std::string s_;
 };
+
+// Minimal ESP system object (ESP.restart(), ESP.getFreeHeap()).
+class EspClass {
+public:
+    void     restart() {}
+    uint32_t getFreeHeap() { return 200000; }
+};
+extern EspClass ESP;
 
 // strlcpy is BSD libc (present on macOS). Provide a fallback elsewhere.
 #if defined(__linux__)

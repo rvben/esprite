@@ -79,6 +79,8 @@ FetchContent_Declare(ArduinoJson
     GIT_TAG v7.2.0
     GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(ArduinoJson)
+# Let ArduinoJson accept our Arduino String shim (uses c_str()/length()).
+target_compile_definitions(ArduinoJson INTERFACE ARDUINOJSON_ENABLE_ARDUINO_STRING=1)
 
 # Optional live device window (SDL2). Built only when SDL2 is present; headless
 # builds and CI are unaffected. The CLI guards --window on HAVE_SDL2.

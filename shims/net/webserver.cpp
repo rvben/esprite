@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
+#include <cctype>
 
 WiFiClass     WiFi;
 MDNSResponder MDNS;
@@ -78,6 +79,25 @@ void WebServer::handleClient() {
     size_t bodyPos = req.find("\r\n\r\n");
     body_ = (bodyPos == std::string::npos) ? "" : req.substr(bodyPos + 4);
 
+    // Parse request headers (lowercased keys) so hasHeader/header work.
+    headers_.clear();
+    size_t hdr_limit = (bodyPos == std::string::npos) ? req.size() : bodyPos;
+    size_t line_start = req.find("\r\n");
+    if (line_start != std::string::npos) line_start += 2;
+    while (line_start != std::string::npos && line_start < hdr_limit) {
+        size_t eol = req.find("\r\n", line_start);
+        if (eol == std::string::npos || eol > hdr_limit) break;
+        std::string line = req.substr(line_start, eol - line_start);
+        size_t colon = line.find(':');
+        if (colon != std::string::npos) {
+            std::string key = line.substr(0, colon), val = line.substr(colon + 1);
+            while (!val.empty() && (val[0] == ' ' || val[0] == '\t')) val.erase(0, 1);
+            for (char& ch : key) ch = (char)tolower((unsigned char)ch);
+            headers_[key] = val;
+        }
+        line_start = eol + 2;
+    }
+
     client_fd_ = fd;
     auto& table = (method == "POST") ? post_ : get_;
     auto it = table.find(path);
@@ -103,4 +123,22 @@ bool WebServer::hasArg(const char* name) {
 }
 String WebServer::arg(const char* name) {
     return (std::string(name) == "plain") ? String(body_.c_str()) : String("");
+}
+
+// The sim collects every request header, so the declared list is a no-op.
+void WebServer::collectHeaders(const char**, size_t) {}
+
+static std::string lower(const char* s) {
+    std::string r(s ? s : "");
+    for (char& c : r) c = (char)tolower((unsigned char)c);
+    return r;
+}
+bool WebServer::hasHeader(const char* name) { return headers_.count(lower(name)) != 0; }
+String WebServer::header(const char* name) {
+    auto it = headers_.find(lower(name));
+    return it == headers_.end() ? String("") : String(it->second.c_str());
+}
+
+void WebServer::stop() {
+    if (listen_fd_ >= 0) { close(listen_fd_); listen_fd_ = -1; }
 }
