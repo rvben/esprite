@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <deque>
 #include <regex>
+#include <vector>
 
 HardwareSerial Serial;
 
@@ -17,15 +18,21 @@ size_t HardwareSerial::print(const char* s) { g_out += s; return std::string(s).
 size_t HardwareSerial::print(int v) { char b[16]; int n = snprintf(b, sizeof(b), "%d", v); g_out += b; return n; }
 size_t HardwareSerial::print(unsigned v) { char b[16]; int n = snprintf(b, sizeof(b), "%u", v); g_out += b; return n; }
 size_t HardwareSerial::println(const char* s) { g_out += s; g_out += '\n'; return std::string(s).size() + 1; }
-size_t HardwareSerial::println(int v) { print(v); g_out += '\n'; return 0; }
+size_t HardwareSerial::println(int v) { size_t n = print(v); g_out += '\n'; return n + 1; }
 
 int HardwareSerial::printf(const char* fmt, ...) {
-    char buf[1024];
-    va_list ap; va_start(ap, fmt);
-    int n = vsnprintf(buf, sizeof(buf), fmt, ap);
+    // Size the buffer to the formatted length, like Print::printf on the
+    // device; a fixed buffer would silently truncate long debug output.
+    va_list ap, ap2;
+    va_start(ap, fmt);
+    va_copy(ap2, ap);
+    int n = vsnprintf(nullptr, 0, fmt, ap);
     va_end(ap);
-    int copied = (n < 0) ? 0 : (n < (int)sizeof(buf) ? n : (int)sizeof(buf) - 1);
-    g_out.append(buf, copied);
+    if (n <= 0) { va_end(ap2); return n; }
+    std::vector<char> buf((size_t)n + 1);
+    vsnprintf(buf.data(), buf.size(), fmt, ap2);
+    va_end(ap2);
+    g_out.append(buf.data(), (size_t)n);
     return n;
 }
 

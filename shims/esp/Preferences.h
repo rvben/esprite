@@ -20,5 +20,5 @@ private:
     std::map<std::string, long> kv_;
     bool readonly_ = true;
     void load();
-    void save();
+    bool save();
 };

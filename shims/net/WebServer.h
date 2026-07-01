@@ -2,6 +2,7 @@
 #include "Arduino.h"
 #include <functional>
 #include <map>
+#include <set>
 #include <string>
 
 #define HTTP_GET  1
@@ -40,7 +41,7 @@ public:
     void send_P(int code, const char* type, const char* body) { send(code, type, String(body)); }
     bool hasArg(const char* name);
     String arg(const char* name);
-    void collectHeaders(const char** names, size_t count);  // sim collects all; no-op list
+    void collectHeaders(const char** names, size_t count);  // declare retained headers (device semantics)
     bool hasHeader(const char* name);
     String header(const char* name);
     void stop();
@@ -53,6 +54,7 @@ private:
     std::map<std::string, Handler> get_, post_;
     std::map<std::string, Handler> upload_handlers_;   // per-path upload callbacks (fidelity only)
     std::map<std::string, std::string> headers_;   // current request headers (lowercased keys)
+    std::set<std::string> declared_;               // collectHeaders() list; only these are exposed
     std::string body_;
     int client_fd_ = -1;
     HTTPUpload upload_;

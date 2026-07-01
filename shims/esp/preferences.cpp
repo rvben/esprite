@@ -27,30 +27,34 @@ void Preferences::load() {
     fclose(f);
 }
 
-void Preferences::save() {
+bool Preferences::save() {
     FILE* f = fopen(path_.c_str(), "w");
-    if (!f) return;
+    if (!f) return false;
     for (auto& kv : kv_) fprintf(f, "%s %ld\n", kv.first.c_str(), kv.second);
     fclose(f);
+    return true;
 }
 
 uint8_t Preferences::getUChar(const char* key, uint8_t def) {
     auto it = kv_.find(key);
     return it == kv_.end() ? def : (uint8_t)it->second;
 }
+// Real NVS rejects writes on a read-only handle (returns 0 bytes written);
+// mutating even in memory would let firmware read back a value the device
+// would never have stored.
 size_t Preferences::putUChar(const char* key, uint8_t value) {
+    if (readonly_) return 0;
     kv_[key] = value;
-    if (!readonly_) save();
-    return 1;
+    return save() ? 1 : 0;
 }
 uint32_t Preferences::getUInt(const char* key, uint32_t def) {
     auto it = kv_.find(key);
     return it == kv_.end() ? def : (uint32_t)it->second;
 }
 size_t Preferences::putUInt(const char* key, uint32_t value) {
+    if (readonly_) return 0;
     kv_[key] = (long)value;
-    if (!readonly_) save();
-    return 4;
+    return save() ? 4 : 0;
 }
 bool Preferences::isKey(const char* key) { return kv_.find(key) != kv_.end(); }
 

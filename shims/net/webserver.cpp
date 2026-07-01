@@ -259,15 +259,43 @@ void WebServer::drive_upload(const Handler& cb) {
     cb();
 }
 
+static const char* reason_phrase(int code) {
+    switch (code) {
+    case 200: return "OK";
+    case 204: return "No Content";
+    case 302: return "Found";
+    case 400: return "Bad Request";
+    case 401: return "Unauthorized";
+    case 403: return "Forbidden";
+    case 404: return "Not Found";
+    case 500: return "Internal Server Error";
+    default:  return "";
+    }
+}
+
+// Write the whole buffer, looping over partial writes. The peer is not
+// draining while the single-threaded server runs, so a short send timeout
+// bounds the worst case instead of wedging the process.
+static void send_all(int fd, const char* data, size_t len) {
+    timeval tv{0, 200000};   // 200 ms, mirrors the recv timeout
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    size_t off = 0;
+    while (off < len) {
+        ssize_t n = ::send(fd, data + off, len - off, 0);
+        if (n <= 0) break;
+        off += (size_t)n;
+    }
+}
+
 void WebServer::send(int code, const char* type, const String& body) {
     if (client_fd_ < 0) return;
     std::string b = body.c_str();
     char hdr[256];
     int hn = snprintf(hdr, sizeof(hdr),
-        "HTTP/1.1 %d OK\r\nContent-Type: %s\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
-        code, type, b.size());
-    ::send(client_fd_, hdr, (size_t)hn, 0);
-    ::send(client_fd_, b.data(), b.size(), 0);
+        "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
+        code, reason_phrase(code), type, b.size());
+    send_all(client_fd_, hdr, (size_t)hn);
+    send_all(client_fd_, b.data(), b.size());
 }
 
 bool WebServer::hasArg(const char* name) {
@@ -277,17 +305,29 @@ String WebServer::arg(const char* name) {
     return (std::string(name) == "plain") ? String(body_.c_str()) : String("");
 }
 
-// The sim collects every request header, so the declared list is a no-op.
-void WebServer::collectHeaders(const char**, size_t) {}
-
 static std::string lower(const char* s) {
     std::string r(s ? s : "");
     for (char& c : r) c = (char)tolower((unsigned char)c);
     return r;
 }
-bool WebServer::hasHeader(const char* name) { return headers_.count(lower(name)) != 0; }
+
+// Real ESP32 WebServer only retains the request headers declared here (an
+// on-device RAM measure). The shim parses every header internally but exposes
+// only declared ones, so firmware that forgets to declare a header fails in
+// the sim exactly as it would on the device.
+void WebServer::collectHeaders(const char** names, size_t count) {
+    declared_.clear();
+    for (size_t i = 0; i < count; ++i) declared_.insert(lower(names[i]));
+}
+
+bool WebServer::hasHeader(const char* name) {
+    std::string key = lower(name);
+    return declared_.count(key) != 0 && headers_.count(key) != 0;
+}
 String WebServer::header(const char* name) {
-    auto it = headers_.find(lower(name));
+    std::string key = lower(name);
+    if (declared_.count(key) == 0) return String("");
+    auto it = headers_.find(key);
     return it == headers_.end() ? String("") : String(it->second.c_str());
 }
 
