@@ -9,6 +9,7 @@ public:
     typedef void (*ApCb)(WiFiManager*);
     void setConfigPortalTimeout(int) {}
     void setConnectTimeout(int) {}
+    void setConnectRetries(int) {}
     void setEnableConfigPortal(bool enable) { portal_enabled_ = enable; }
     void setAPCallback(ApCb cb) { ap_cb_ = cb; }
     bool autoConnect(const char* ap_ssid = nullptr) {
