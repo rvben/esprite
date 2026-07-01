@@ -146,8 +146,7 @@ int esp32sim_main(int argc, char** argv) {
             const SimTarget* at = sim_active_target();
             int scale = 1;
             if (const char* sc = opt_val(argc, argv, "--scale")) scale = atoi(sc);
-            win = sim_window_open(at->key, at->board->width, at->board->height, scale,
-                                  at->board->buttons, at->board->button_count);
+            win = sim_window_open(at->key, at->board, scale);
             if (!win) fprintf(stderr, "serve: could not open a window; continuing headless\n");
         }
 #else

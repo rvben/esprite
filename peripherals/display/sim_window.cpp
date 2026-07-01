@@ -16,7 +16,8 @@ int  sim_gpio_get(int pin);
 void sim_gpio_set(int pin, int level);
 
 static const int MAX_BTN  = 8;
-static const int CHROME_W = 104;   // bezel width when there are buttons
+static const int CHROME_W = 104;   // right bezel width when there are buttons
+static const int STRIP_H  = 56;    // bottom control strip height when needed
 
 struct WinBtn { SDL_Rect r; const SimButton* def; };
 
@@ -24,17 +25,20 @@ struct SimWindow {
     SDL_Window*   window   = nullptr;
     SDL_Renderer* renderer = nullptr;
     SDL_Texture*  texture  = nullptr;
-    int  w = 0, h = 0, scale = 1, chrome = 0;
+    int  w = 0, h = 0, scale = 1, chrome = 0, strip = 0;
     bool vsync = false;
     bool touching = false;
-    int  mouse_held = -1;      // index of a button held by the mouse
+    int  mouse_held = -1;
     int  pwr_flash = 0;
     int  nbtn = 0;
     WinBtn btns[MAX_BTN];
+    // Hardware control strip.
+    bool has_battery = false, has_rotation = false, bat_dragging = false;
+    SDL_Rect bat_bar{}, chg_btn{}, usb_btn{}, rot_btn{};
     std::string capture_path;
 };
 
-// ---- 5x7 font (A-Z, 0-9) for arbitrary button labels; bit 4 = leftmost ----
+// ---- 5x7 font (A-Z, 0-9, %) for labels; bit 4 = leftmost ----
 struct Glyph { char c; uint8_t rows[7]; };
 static const Glyph FONT[] = {
     {'0',{0x0E,0x11,0x13,0x15,0x19,0x11,0x0E}}, {'1',{0x04,0x0C,0x04,0x04,0x04,0x04,0x0E}},
@@ -55,6 +59,7 @@ static const Glyph FONT[] = {
     {'U',{0x11,0x11,0x11,0x11,0x11,0x11,0x0E}}, {'V',{0x11,0x11,0x11,0x11,0x11,0x0A,0x04}},
     {'W',{0x11,0x11,0x11,0x15,0x15,0x1B,0x11}}, {'X',{0x11,0x11,0x0A,0x04,0x0A,0x11,0x11}},
     {'Y',{0x11,0x11,0x0A,0x04,0x04,0x04,0x04}}, {'Z',{0x1F,0x01,0x02,0x04,0x08,0x10,0x1F}},
+    {'%',{0x18,0x19,0x02,0x04,0x08,0x13,0x03}},
 };
 static const uint8_t* glyph(char c) {
     if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
@@ -76,10 +81,22 @@ static void draw_text(SDL_Renderer* r, int x, int y, const char* s, int px) {
         cx += 6 * px;
     }
 }
-
 static bool in_rect(const SDL_Rect& r, int x, int y) {
     return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
+
+static void draw_labeled(SDL_Renderer* r, const SDL_Rect& rect, const char* label,
+                         bool on, int px) {
+    if (on) SDL_SetRenderDrawColor(r, 92, 122, 92, 255);
+    else    SDL_SetRenderDrawColor(r, 58, 60, 66, 255);
+    SDL_RenderFillRect(r, &rect);
+    SDL_SetRenderDrawColor(r, 140, 142, 150, 255);
+    SDL_RenderDrawRect(r, &rect);
+    int tw = text_w(label, px), th = 7 * px;
+    SDL_SetRenderDrawColor(r, 232, 232, 238, 255);
+    draw_text(r, rect.x + (rect.w - tw) / 2, rect.y + (rect.h - th) / 2, label, px);
+}
+
 static void set_touch(SimWindow* win, int wx, int wy) {
     float lx = 0, ly = 0;
     SDL_RenderWindowToLogical(win->renderer, wx, wy, &lx, &ly);
@@ -89,6 +106,13 @@ static void set_touch(SimWindow* win, int wx, int wy) {
     sim_input().touch_x = x;
     sim_input().touch_y = y;
 }
+static void set_battery_from_x(SimWindow* win, int mx) {
+    int span = win->bat_bar.w - 4;
+    int pct = span > 0 ? (mx - (win->bat_bar.x + 2)) * 100 / span : 0;
+    if (pct < 0) pct = 0; else if (pct > 100) pct = 100;
+    sim_input().battery_pct = pct;
+}
+
 static void press_action(SimWindow* win, const SimButton* b) {
     switch (b->action) {
     case ACT_PRIMARY:   sim_input().button[0] = true; break;
@@ -114,21 +138,12 @@ static bool is_active(SimWindow* win, const SimButton* b) {
     }
     return false;
 }
-static void draw_button(SDL_Renderer* r, const WinBtn& b, bool pressed) {
-    if (pressed) SDL_SetRenderDrawColor(r, 92, 122, 92, 255);
-    else         SDL_SetRenderDrawColor(r, 58, 60, 66, 255);
-    SDL_RenderFillRect(r, &b.r);
-    SDL_SetRenderDrawColor(r, 140, 142, 150, 255);
-    SDL_RenderDrawRect(r, &b.r);
-    const int px = 3;
-    int tw = text_w(b.def->label, px), th = 7 * px;
-    SDL_SetRenderDrawColor(r, 232, 232, 238, 255);
-    draw_text(r, b.r.x + (b.r.w - tw) / 2, b.r.y + (b.r.h - th) / 2, b.def->label, px);
-}
 
-SimWindow* sim_window_open(const char* title, int w, int h, int scale,
-                           const SimButton* buttons, int button_count) {
+SimWindow* sim_window_open(const char* title, const BoardDesc* board, int scale) {
+    if (!board) return nullptr;
     if (scale < 1) scale = 1;
+    const int w = board->width, h = board->height;
+
     SDL_SetMainReady();
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         fprintf(stderr, "sim_window: SDL_Init failed: %s\n", SDL_GetError());
@@ -136,39 +151,40 @@ SimWindow* sim_window_open(const char* title, int w, int h, int scale,
     }
     SimWindow* win = new SimWindow();
     win->w = w; win->h = h; win->scale = scale;
-    win->nbtn = button_count < 0 ? 0 : (button_count > MAX_BTN ? MAX_BTN : button_count);
+    win->nbtn = board->button_count < 0 ? 0
+              : (board->button_count > MAX_BTN ? MAX_BTN : board->button_count);
     win->chrome = win->nbtn > 0 ? CHROME_W : 0;
+    win->has_battery  = board->has_battery;
+    win->has_rotation = board->has_rotation;
+    win->strip = (win->has_battery || win->has_rotation) ? STRIP_H : 0;
 
     win->window = SDL_CreateWindow(title ? title : "esp32-sim",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        (w + win->chrome) * scale, h * scale, SDL_WINDOW_ALLOW_HIGHDPI);
+        (w + win->chrome) * scale, (h + win->strip) * scale, SDL_WINDOW_ALLOW_HIGHDPI);
     if (!win->window) {
         fprintf(stderr, "sim_window: SDL_CreateWindow failed: %s\n", SDL_GetError());
-        sim_window_close(win);
-        return nullptr;
+        sim_window_close(win); return nullptr;
     }
     win->renderer = SDL_CreateRenderer(win->window, -1,
         SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!win->renderer) win->renderer = SDL_CreateRenderer(win->window, -1, 0);
     if (!win->renderer) {
         fprintf(stderr, "sim_window: SDL_CreateRenderer failed: %s\n", SDL_GetError());
-        sim_window_close(win);
-        return nullptr;
+        sim_window_close(win); return nullptr;
     }
     SDL_RendererInfo info;
     if (SDL_GetRendererInfo(win->renderer, &info) == 0)
         win->vsync = (info.flags & SDL_RENDERER_PRESENTVSYNC) != 0;
-    SDL_RenderSetLogicalSize(win->renderer, w + win->chrome, h);
+    SDL_RenderSetLogicalSize(win->renderer, w + win->chrome, h + win->strip);
 
     win->texture = SDL_CreateTexture(win->renderer, SDL_PIXELFORMAT_RGB565,
         SDL_TEXTUREACCESS_STREAMING, w, h);
     if (!win->texture) {
         fprintf(stderr, "sim_window: SDL_CreateTexture failed: %s\n", SDL_GetError());
-        sim_window_close(win);
-        return nullptr;
+        sim_window_close(win); return nullptr;
     }
 
-    // Lay the declared buttons out vertically in the bezel, sized to fit.
+    // Buttons in the right bezel.
     if (win->nbtn > 0) {
         const int gap = 16, margin = 24;
         int bh = (h - 2 * margin - (win->nbtn - 1) * gap) / win->nbtn;
@@ -177,15 +193,42 @@ SimWindow* sim_window_open(const char* title, int w, int h, int scale,
         int total = win->nbtn * bh + (win->nbtn - 1) * gap;
         int by = (h - total) / 2;
         for (int i = 0; i < win->nbtn; ++i) {
-            win->btns[i].def = &buttons[i];
+            win->btns[i].def = &board->buttons[i];
             win->btns[i].r = SDL_Rect{bx, by + i * (bh + gap), bw, bh};
         }
-        fprintf(stderr, "sim_window: %d side button(s):", win->nbtn);
-        for (int i = 0; i < win->nbtn; ++i)
-            fprintf(stderr, " %s%s", buttons[i].label, i + 1 < win->nbtn ? "," : "");
-        fprintf(stderr, "  (mouse on screen = touch, Esc quits)\n");
     }
+
+    // Hardware controls in the bottom strip, right-aligned toggles.
+    if (win->strip > 0) {
+        int y0 = h, ty = y0 + (STRIP_H - 34) / 2, rx = w - 12 - 56;
+        if (win->has_rotation) { win->rot_btn = {rx, ty, 56, 34}; rx -= 64; }
+        if (win->has_battery) {
+            win->usb_btn = {rx, ty, 56, 34}; rx -= 64;
+            win->chg_btn = {rx, ty, 56, 34};
+            // Size the bar to fit before the toggles, leaving room for "100%".
+            int bar_x = 12, text_room = text_w("100%", 2) + 16;
+            int bar_w = win->chg_btn.x - text_room - bar_x;
+            if (bar_w > 150) bar_w = 150;
+            if (bar_w < 40)  bar_w = 40;
+            win->bat_bar = {bar_x, y0 + (STRIP_H - 22) / 2, bar_w, 22};
+        }
+    }
+
+    fprintf(stderr, "sim_window: %s", win->nbtn ? "buttons" : "no buttons");
+    if (win->has_battery)  fprintf(stderr, ", battery/charge/USB");
+    if (win->has_rotation) fprintf(stderr, ", rotate");
+    fprintf(stderr, "  (mouse on screen = touch, Esc quits)\n");
     return win;
+}
+
+static void handle_strip_click(SimWindow* win, int mx, int my) {
+    if (win->has_battery) {
+        if (in_rect(win->bat_bar, mx, my)) { win->bat_dragging = true; set_battery_from_x(win, mx); return; }
+        if (in_rect(win->chg_btn, mx, my)) { sim_input().charging = !sim_input().charging; return; }
+        if (in_rect(win->usb_btn, mx, my)) { sim_input().vbus = !sim_input().vbus; return; }
+    }
+    if (win->has_rotation && in_rect(win->rot_btn, mx, my))
+        sim_input().quadrant = (sim_input().quadrant + 1) % 4;
 }
 
 bool sim_window_tick(SimWindow* win) {
@@ -199,7 +242,9 @@ bool sim_window_tick(SimWindow* win) {
             if (e.button.button == SDL_BUTTON_LEFT) {
                 float lx = 0, ly = 0;
                 SDL_RenderWindowToLogical(win->renderer, e.button.x, e.button.y, &lx, &ly);
-                if (lx < win->w) {
+                if (ly >= win->h) {
+                    handle_strip_click(win, (int)lx, (int)ly);
+                } else if (lx < win->w) {
                     win->touching = true;
                     sim_input().touch_pressed = true;
                     set_touch(win, e.button.x, e.button.y);
@@ -216,6 +261,7 @@ bool sim_window_tick(SimWindow* win) {
         case SDL_MOUSEBUTTONUP:
             if (e.button.button == SDL_BUTTON_LEFT) {
                 if (win->touching) { win->touching = false; sim_input().touch_pressed = false; }
+                win->bat_dragging = false;
                 if (win->mouse_held >= 0) {
                     release_action(win->btns[win->mouse_held].def);
                     win->mouse_held = -1;
@@ -223,7 +269,13 @@ bool sim_window_tick(SimWindow* win) {
             }
             break;
         case SDL_MOUSEMOTION:
-            if (win->touching) set_touch(win, e.motion.x, e.motion.y);
+            if (win->touching) {
+                set_touch(win, e.motion.x, e.motion.y);
+            } else if (win->bat_dragging) {
+                float lx = 0, ly = 0;
+                SDL_RenderWindowToLogical(win->renderer, e.motion.x, e.motion.y, &lx, &ly);
+                set_battery_from_x(win, (int)lx);
+            }
             break;
         case SDL_KEYDOWN:
             if (e.key.keysym.sym == SDLK_ESCAPE) return false;
@@ -243,28 +295,55 @@ bool sim_window_tick(SimWindow* win) {
         }
     }
 
+    SDL_Renderer* r = win->renderer;
     SDL_UpdateTexture(win->texture, nullptr, sim_framebuffer().data(), win->w * 2);
-    SDL_SetRenderDrawColor(win->renderer, 24, 25, 28, 255);
-    SDL_RenderClear(win->renderer);
+    SDL_SetRenderDrawColor(r, 24, 25, 28, 255);
+    SDL_RenderClear(r);
     SDL_Rect dev{0, 0, win->w, win->h};
-    SDL_RenderCopy(win->renderer, win->texture, nullptr, &dev);
+    SDL_RenderCopy(r, win->texture, nullptr, &dev);
 
     if (win->pwr_flash > 0) --win->pwr_flash;
     for (int i = 0; i < win->nbtn; ++i)
-        draw_button(win->renderer, win->btns[i], is_active(win, win->btns[i].def));
+        draw_labeled(r, win->btns[i].r, win->btns[i].def->label, is_active(win, win->btns[i].def), 3);
+
+    if (win->strip > 0) {
+        SDL_Rect strip{0, win->h, win->w + win->chrome, win->strip};
+        SDL_SetRenderDrawColor(r, 18, 19, 22, 255);
+        SDL_RenderFillRect(r, &strip);
+        if (win->has_battery) {
+            int pct = sim_input().battery_pct;
+            if (pct < 0) pct = 0; else if (pct > 100) pct = 100;
+            SDL_SetRenderDrawColor(r, 120, 122, 130, 255);
+            SDL_RenderDrawRect(r, &win->bat_bar);
+            SDL_Rect fill{win->bat_bar.x + 2, win->bat_bar.y + 2,
+                          (win->bat_bar.w - 4) * pct / 100, win->bat_bar.h - 4};
+            if (pct <= 10)      SDL_SetRenderDrawColor(r, 200, 60, 50, 255);
+            else if (pct <= 20) SDL_SetRenderDrawColor(r, 210, 150, 40, 255);
+            else                SDL_SetRenderDrawColor(r, 90, 170, 90, 255);
+            SDL_RenderFillRect(r, &fill);
+            char buf[8]; snprintf(buf, sizeof(buf), "%d%%", pct);
+            SDL_SetRenderDrawColor(r, 220, 220, 228, 255);
+            draw_text(r, win->bat_bar.x + win->bat_bar.w + 10, win->bat_bar.y + 4, buf, 2);
+            draw_labeled(r, win->chg_btn, "CHG", sim_input().charging, 2);
+            draw_labeled(r, win->usb_btn, "USB", sim_input().vbus, 2);
+        }
+        if (win->has_rotation) {
+            char rl[4]; snprintf(rl, sizeof(rl), "R%d", sim_input().quadrant);
+            draw_labeled(r, win->rot_btn, rl, false, 2);
+        }
+    }
 
     if (!win->capture_path.empty()) {
         int ow = 0, oh = 0;
-        SDL_GetRendererOutputSize(win->renderer, &ow, &oh);
+        SDL_GetRendererOutputSize(r, &ow, &oh);
         std::vector<uint8_t> rgb((size_t)ow * oh * 3);
         if (ow > 0 && oh > 0 &&
-            SDL_RenderReadPixels(win->renderer, nullptr, SDL_PIXELFORMAT_RGB24,
-                                 rgb.data(), ow * 3) == 0)
+            SDL_RenderReadPixels(r, nullptr, SDL_PIXELFORMAT_RGB24, rgb.data(), ow * 3) == 0)
             stbi_write_png(win->capture_path.c_str(), ow, oh, 3, rgb.data(), ow * 3);
         win->capture_path.clear();
     }
 
-    SDL_RenderPresent(win->renderer);
+    SDL_RenderPresent(r);
     if (!win->vsync) SDL_Delay(15);
     return true;
 }
