@@ -3,6 +3,8 @@
 #include <vector>
 #include <string>
 #include <initializer_list>
+#include <cstdio>
+#include <sys/stat.h>
 
 static int run_cli(std::initializer_list<const char*> args) {
     std::vector<char*> argv;
@@ -13,6 +15,8 @@ static int run_cli(std::initializer_list<const char*> args) {
     return esprite_main((int)argv.size(), argv.data());
 }
 
+static bool file_exists(const char* p) { struct stat st; return stat(p, &st) == 0; }
+
 TEST_CASE("schema, help, and list-targets succeed without a booted target") {
     CHECK(run_cli({"esprite", "schema"}) == 0);
     CHECK(run_cli({"esprite", "--help"}) == 0);
@@ -21,4 +25,18 @@ TEST_CASE("schema, help, and list-targets succeed without a booted target") {
 
 TEST_CASE("no arguments is a usage error") {
     CHECK(run_cli({"esprite"}) == 1);
+}
+
+TEST_CASE("--json is a global flag, never consumed as a positional") {
+    // Regression: `screenshot --json` used to treat --json as the output-path
+    // positional, writing a file literally named "--json" instead of the default.
+    // --json must select JSON output and be skipped by positional parsing.
+    std::remove("--json");
+    std::remove("esprite.png");
+    int rc = run_cli({"esprite", "screenshot", "--target", "sample_gfx", "--json"});
+    CHECK(rc == 0);
+    CHECK_FALSE(file_exists("--json"));   // must NOT create a file named after the flag
+    CHECK(file_exists("esprite.png"));    // default output path used instead
+    std::remove("--json");
+    std::remove("esprite.png");
 }

@@ -31,6 +31,7 @@ static const char* kSchema = R"JSON({
   "description": "Host-native ESP32 simulator. Boots a target's firmware, renders its UI, and drives it: snapshot-ref UI reads, input injection, screenshots, and a persistent JSON session. Results are JSON on stdout; logs go to stderr.",
   "global_args": [
     { "name": "--output", "description": "Output format. auto = text on a TTY, JSON when piped.", "type": "string", "enum": ["auto", "json", "text"], "default": "auto" },
+    { "name": "--json", "description": "Shorthand for --output json.", "type": "boolean" },
     { "name": "--target", "description": "Target to boot (see list-targets). Optional when exactly one is registered.", "type": "string" },
     { "name": "--limit", "description": "Max items to return from list commands (list-targets, ui).", "type": "number" },
     { "name": "--offset", "description": "Items to skip from list commands (pagination).", "type": "number" },
@@ -137,7 +138,7 @@ static std::string positional(int argc, char** argv, int index) {
     static const char* val_opts[] = {"--target", "--steps", "--path", "--shot",
                                      "--port", "--interval-ms", "--scale", "--ref",
                                      "--output", "-o", "--limit", "--offset", "--fields"};
-    static const char* flag_opts[] = {"--charging", "--no-vbus", "--window"};
+    static const char* flag_opts[] = {"--charging", "--no-vbus", "--window", "--json"};
     int seen = 0;
     for (int i = 2; i < argc; ++i) {
         bool matched = false;
@@ -202,6 +203,7 @@ static void set_output_mode(int argc, char** argv) {
     const char* om = opt_val(argc, argv, "--output");
     if (!om) om = opt_val(argc, argv, "-o");
     std::string m = om ? om : "auto";
+    if (opt_flag(argc, argv, "--json")) m = "json";   // convenience alias for --output json
     if (m == "json")      g_json = true;
     else if (m == "text") g_json = false;
     else                  g_json = !isatty(fileno(stdout));
