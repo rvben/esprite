@@ -1,6 +1,5 @@
 #pragma once
-
-typedef struct lv_display_t lv_display_t;
+#include "lvgl.h"
 
 // Initialize LVGL (once) and create a display whose flush callback writes into
 // the sim framebuffer, sized w x h. Reusable by any LVGL-based target that does

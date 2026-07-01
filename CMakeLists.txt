@@ -48,14 +48,15 @@ add_library(core STATIC
 target_include_directories(core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core)
 target_link_libraries(core PUBLIC shims)
 
-# LVGL 9.2 built from source with the sim lv_conf.h.
+# LVGL built from source with the sim lv_conf.h. Pinned to 9.5.0 to match the
+# version the Clawdmeter fonts were patched for (lv_font_t has static_bitmap).
+set(LV_BUILD_CONF_PATH ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/lvgl/lv_conf.h
+    CACHE STRING "" FORCE)
 FetchContent_Declare(lvgl
     GIT_REPOSITORY https://github.com/lvgl/lvgl.git
-    GIT_TAG v9.2.2
+    GIT_TAG v9.5.0
     GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(lvgl)
-target_include_directories(lvgl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/lvgl)
-target_compile_definitions(lvgl PUBLIC LV_CONF_INCLUDE_SIMPLE)
 
 # LVGL globs its NEON .S sources unconditionally. We use the NONE asm path, and
 # Apple's assembler cannot process those files (they pull in C headers), so drop
@@ -127,5 +128,12 @@ add_executable(sim_tests
 target_link_libraries(sim_tests PRIVATE cli_lib)
 link_sim_targets(sim_tests)
 
+# Integration tests that boot real targets, isolated from unit tests so LVGL
+# global state stays clean.
+add_executable(sim_itests tests/itest_clawdmeter.cpp)
+target_link_libraries(sim_itests PRIVATE cli_lib)
+link_sim_targets(sim_itests)
+
 enable_testing()
 add_test(NAME sim_tests COMMAND sim_tests)
+add_test(NAME sim_itests COMMAND sim_itests)
