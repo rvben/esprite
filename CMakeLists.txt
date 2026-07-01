@@ -29,6 +29,23 @@ target_include_directories(shims PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/shims/net)
 target_link_libraries(shims PUBLIC third_party)
 
+# Virtual peripherals (display framebuffer + PNG screenshot).
+add_library(peripherals STATIC
+    peripherals/display/framebuffer.cpp
+    peripherals/display/screenshot.cpp
+)
+target_include_directories(peripherals PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/display)
+target_link_libraries(peripherals PUBLIC third_party)
+
+# Core runtime + target registry.
+add_library(core STATIC
+    core/target.cpp
+    core/runtime.cpp
+)
+target_include_directories(core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core)
+target_link_libraries(core PUBLIC shims)
+
 # Unit-test executable. Grows as components are added.
 add_executable(sim_tests
     tests/test_smoke.cpp
@@ -37,8 +54,11 @@ add_executable(sim_tests
     tests/test_heapcaps.cpp
     tests/test_prefs.cpp
     tests/test_webserver.cpp
+    tests/test_framebuffer.cpp
+    tests/test_screenshot.cpp
+    tests/test_target.cpp
 )
-target_link_libraries(sim_tests PRIVATE third_party shims)
+target_link_libraries(sim_tests PRIVATE peripherals core)
 
 enable_testing()
 add_test(NAME sim_tests COMMAND sim_tests)
