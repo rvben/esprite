@@ -195,6 +195,7 @@ add_executable(sim_tests
     tests/test_lvgl_smoke.cpp
     tests/test_gfx.cpp
     tests/test_cli.cpp
+    tests/test_daemon.cpp
 )
 target_link_libraries(sim_tests PRIVATE cli_lib)
 link_sim_targets(sim_tests)

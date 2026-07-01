@@ -27,5 +27,6 @@ extern HardwareSerial Serial;
 // Sim-side observability and injection.
 std::string sim_serial_output();
 bool        sim_serial_contains(const std::string& regex);
+bool        sim_serial_regex_valid(const std::string& regex);
 void        sim_serial_inject(const std::string& data);
 void        sim_serial_clear();

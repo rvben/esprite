@@ -35,6 +35,12 @@ TEST_CASE("commands reject capabilities the active board lacks") {
     CHECK(run_cli({"esprite", "button", "primary", "--target", "sample_gfx"}) == 7);
 }
 
+TEST_CASE("serial expect with an invalid regex is bad_args, not a crash") {
+    // Regression: a malformed pattern threw std::regex_error out of esprite_main
+    // and aborted the whole process instead of reporting a structured error.
+    CHECK(run_cli({"esprite", "serial", "expect", "(", "--target", "sample_gfx"}) == 2);
+}
+
 TEST_CASE("--json is a global flag, never consumed as a positional") {
     // Regression: `screenshot --json` used to treat --json as the output-path
     // positional, writing a file literally named "--json" instead of the default.

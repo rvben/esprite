@@ -191,7 +191,6 @@ static bool board_has_action(SimInputAction act) {
     return false;
 }
 
-static int cmd_daemon();
 
 // JSON-escape a string into out (for structured stdout results).
 static std::string json_esc(const std::string& s) {
@@ -308,7 +307,7 @@ int esprite_main(int argc, char** argv) {
         return 0;
     }
 
-    if (cmd == "run") return cmd_daemon();
+    if (cmd == "run") return esprite_daemon(stdin, stdout);
 
     if (cmd == "scenario") {
         std::string file = positional(argc, argv, 0);
@@ -503,6 +502,8 @@ int esprite_main(int argc, char** argv) {
             return 0;
         }
         if (sub == "expect") {
+            if (!sim_serial_regex_valid(arg))
+                return fail("bad_args", "invalid regex '" + arg + "'", 2);
             sim_run_steps(WARMUP_STEPS);
             bool matched = sim_serial_contains(arg);
             emit("{\"matched\":" + std::string(jbool(matched)) + "}", matched ? "matched" : "no match");
@@ -519,50 +520,51 @@ int esprite_main(int argc, char** argv) {
     return fail("bad_args", "unknown command '" + cmd + "' (try: esprite schema)", 2);
 }
 
-// Daemon: a persistent agent session. Read newline-delimited JSON commands on
-// stdin, emit one JSON reply per line. Refs from {"cmd":"ui"} stay valid for
-// {"cmd":"tap","ref":...} within the session (the snapshot-ref model).
-static int cmd_daemon() {
+// Daemon: a persistent agent session. Read newline-delimited JSON commands from
+// `in`, emit one JSON reply per line on `out`. Refs from {"cmd":"ui"} stay valid
+// for {"cmd":"tap","ref":...} within the session (the snapshot-ref model).
+// Streams are injected so tests can drive a full session in-process.
+int esprite_daemon(FILE* in, FILE* out) {
     char line[16384];
     bool booted = false;
-    while (fgets(line, sizeof(line), stdin)) {
+    while (fgets(line, sizeof(line), in)) {
         JsonDocument doc;
-        if (deserializeJson(doc, line)) { printf("{\"error\":\"bad_json\"}\n"); fflush(stdout); continue; }
+        if (deserializeJson(doc, line)) { fprintf(out, "{\"error\":\"bad_json\"}\n"); fflush(out); continue; }
         std::string cmd = doc["cmd"] | "";
 
         if (cmd == "boot") {
             std::string t = doc["target"] | "";
             booted = sim_boot(t);
             if (booted) sim_run_steps(WARMUP_STEPS);   // sim_boot resets UI refs
-            printf("{\"ok\":%s}\n", jbool(booted));
+            fprintf(out, "{\"ok\":%s}\n", jbool(booted));
         } else if (!booted) {
-            printf("{\"error\":\"not_booted\"}\n");
+            fprintf(out, "{\"error\":\"not_booted\"}\n");
         } else if (cmd == "ui") {
-            printf("%s\n", lvgl_snapshot_json().c_str());
+            fprintf(out, "%s\n", lvgl_snapshot_json().c_str());
         } else if (cmd == "screenshot") {
-            const char* out = doc["out"] | "esprite.png";
-            bool ok = sim_screenshot_png(out);
-            printf("{\"ok\":%s,\"path\":\"%s\",\"w\":%d,\"h\":%d}\n",
-                   jbool(ok), json_esc(out).c_str(), sim_framebuffer().w(), sim_framebuffer().h());
+            const char* path = doc["out"] | "esprite.png";
+            bool ok = sim_screenshot_png(path);
+            fprintf(out, "{\"ok\":%s,\"path\":\"%s\",\"w\":%d,\"h\":%d}\n",
+                    jbool(ok), json_esc(path).c_str(), sim_framebuffer().w(), sim_framebuffer().h());
         } else if (cmd == "tap") {
             int x, y;
             if (doc["ref"].is<const char*>()) {
                 std::string ref = doc["ref"] | "";
                 if (!lvgl_ref_center(ref, &x, &y)) {
-                    printf("{\"ok\":false,\"error\":\"ref_not_found\"}\n"); fflush(stdout); continue;
+                    fprintf(out, "{\"ok\":false,\"error\":\"ref_not_found\"}\n"); fflush(out); continue;
                 }
             } else { x = doc["x"] | 0; y = doc["y"] | 0; }
             sim_input().touch_pressed = true; sim_input().touch_x = x; sim_input().touch_y = y;
             sim_run_steps(4);
             sim_input().touch_pressed = false; sim_run_steps(4);
-            printf("{\"ok\":true,\"x\":%d,\"y\":%d}\n", x, y);
+            fprintf(out, "{\"ok\":true,\"x\":%d,\"y\":%d}\n", x, y);
         } else if (cmd == "button") {
             std::string which = doc["which"] | "primary";
             SimInputAction act = (which == "pwr")       ? ACT_PWR
                                : (which == "secondary") ? ACT_SECONDARY
                                                         : ACT_PRIMARY;
             if (!board_has_action(act)) {
-                printf("{\"ok\":false,\"error\":\"unsupported\"}\n");
+                fprintf(out, "{\"ok\":false,\"error\":\"unsupported\"}\n");
             } else {
                 if (which == "pwr") { sim_input().pwr_events.push_back(1); sim_run_steps(5); }
                 else {
@@ -570,51 +572,55 @@ static int cmd_daemon() {
                     sim_input().button[idx] = true;  sim_run_steps(5);
                     sim_input().button[idx] = false; sim_run_steps(3);
                 }
-                printf("{\"ok\":true}\n");
+                fprintf(out, "{\"ok\":true}\n");
             }
         } else if (cmd == "battery") {
             if (!active_board() || !active_board()->has_battery) {
-                printf("{\"ok\":false,\"error\":\"unsupported\"}\n");
+                fprintf(out, "{\"ok\":false,\"error\":\"unsupported\"}\n");
             } else {
                 sim_input().battery_pct = doc["pct"] | 75;
                 if (doc["charging"].is<bool>()) sim_input().charging = doc["charging"];
                 if (doc["vbus"].is<bool>())     sim_input().vbus = doc["vbus"];
                 sim_run_steps(5);
-                printf("{\"ok\":true}\n");
+                fprintf(out, "{\"ok\":true}\n");
             }
         } else if (cmd == "rotate") {
             if (!active_board() || !active_board()->has_rotation) {
-                printf("{\"ok\":false,\"error\":\"unsupported\"}\n");
+                fprintf(out, "{\"ok\":false,\"error\":\"unsupported\"}\n");
             } else {
-                sim_input().quadrant = doc["q"] | 0; sim_run_steps(5); printf("{\"ok\":true}\n");
+                sim_input().quadrant = doc["q"] | 0; sim_run_steps(5); fprintf(out, "{\"ok\":true}\n");
             }
         } else if (cmd == "gpio") {
-            sim_gpio_set(doc["pin"] | 0, doc["level"] | 0); sim_run_steps(5); printf("{\"ok\":true}\n");
+            sim_gpio_set(doc["pin"] | 0, doc["level"] | 0); sim_run_steps(5); fprintf(out, "{\"ok\":true}\n");
         } else if (cmd == "snapshot") {
             std::string body; serializeJson(doc["data"], body);
             bool ok = sim_wifi_post(doc["path"] | "/snapshot", body);
-            if (ok) printf("{\"ok\":true}\n");
-            else printf("{\"ok\":false,\"error\":\"post_failed\"}\n");
+            if (ok) fprintf(out, "{\"ok\":true}\n");
+            else fprintf(out, "{\"ok\":false,\"error\":\"post_failed\"}\n");
         } else if (cmd == "steps") {
-            sim_run_steps(doc["n"] | 10); printf("{\"ok\":true}\n");
+            sim_run_steps(doc["n"] | 10); fprintf(out, "{\"ok\":true}\n");
         } else if (cmd == "serial") {
             std::string sub = doc["sub"] | "";
             if (sub == "send") {
                 std::string text = doc["text"] | "";
-                sim_serial_inject(text + "\n"); sim_run_steps(5); printf("{\"ok\":true}\n");
+                sim_serial_inject(text + "\n"); sim_run_steps(5); fprintf(out, "{\"ok\":true}\n");
             } else if (sub == "expect") {
                 std::string rx = doc["regex"] | "";
-                sim_run_steps(WARMUP_STEPS);
-                printf("{\"matched\":%s}\n", jbool(sim_serial_contains(rx)));
-            } else printf("{\"error\":\"serial_sub\"}\n");
+                if (!sim_serial_regex_valid(rx)) {
+                    fprintf(out, "{\"error\":\"bad_regex\"}\n");
+                } else {
+                    sim_run_steps(WARMUP_STEPS);
+                    fprintf(out, "{\"matched\":%s}\n", jbool(sim_serial_contains(rx)));
+                }
+            } else fprintf(out, "{\"error\":\"serial_sub\"}\n");
         } else if (cmd == "logs") {
-            printf("{\"serial\":\"%s\"}\n", json_esc(sim_serial_output()).c_str());
+            fprintf(out, "{\"serial\":\"%s\"}\n", json_esc(sim_serial_output()).c_str());
         } else if (cmd == "quit" || cmd == "exit") {
             break;
         } else {
-            printf("{\"error\":\"unknown_cmd\"}\n");
+            fprintf(out, "{\"error\":\"unknown_cmd\"}\n");
         }
-        fflush(stdout);
+        fflush(out);
     }
     return 0;
 }
