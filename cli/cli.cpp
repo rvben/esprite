@@ -122,34 +122,58 @@ static const char* kSchema = R"JSON({
   ]
 })JSON";
 
+// Recognized options, shared by option lookup, positional parsing, and the
+// strict pre-dispatch validation. A bare `--` ends option parsing, so free-form
+// positionals (serial send text, for example) can themselves start with dashes.
+static const char* kValOpts[]  = {"--target", "--steps", "--path", "--shot",
+                                  "--port", "--interval-ms", "--scale", "--ref",
+                                  "--output", "-o", "--limit", "--offset", "--fields"};
+static const char* kFlagOpts[] = {"--charging", "--no-vbus", "--window", "--json", "--help"};
+
+static bool is_val_opt(const char* a)  { for (auto* o : kValOpts)  if (!strcmp(a, o)) return true; return false; }
+static bool is_flag_opt(const char* a) { for (auto* o : kFlagOpts) if (!strcmp(a, o)) return true; return false; }
+
 static const char* opt_val(int argc, char** argv, const char* name) {
-    for (int i = 0; i < argc - 1; ++i)
+    for (int i = 0; i < argc - 1; ++i) {
+        if (!strcmp(argv[i], "--")) break;
         if (!strcmp(argv[i], name)) return argv[i + 1];
+    }
     return nullptr;
 }
 static bool opt_flag(int argc, char** argv, const char* name) {
-    for (int i = 0; i < argc; ++i) if (!strcmp(argv[i], name)) return true;
+    for (int i = 0; i < argc; ++i) {
+        if (!strcmp(argv[i], "--")) break;
+        if (!strcmp(argv[i], name)) return true;
+    }
     return false;
 }
 
-// Positional args after the command. Only *recognized* options are skipped, so
-// free-form positionals that start with a dash (e.g. `serial send -AT`, negative
-// coordinates) are preserved.
+// Positional args after the command. Recognized options are skipped; single-dash
+// tokens other than -o are preserved (negative coordinates, `serial send -AT`).
 static std::string positional(int argc, char** argv, int index) {
-    static const char* val_opts[] = {"--target", "--steps", "--path", "--shot",
-                                     "--port", "--interval-ms", "--scale", "--ref",
-                                     "--output", "-o", "--limit", "--offset", "--fields"};
-    static const char* flag_opts[] = {"--charging", "--no-vbus", "--window", "--json"};
     int seen = 0;
+    bool opts_ended = false;
     for (int i = 2; i < argc; ++i) {
-        bool matched = false;
-        for (auto* vo : val_opts) if (!strcmp(argv[i], vo)) { ++i; matched = true; break; }
-        if (matched) continue;
-        for (auto* fo : flag_opts) if (!strcmp(argv[i], fo)) { matched = true; break; }
-        if (matched) continue;
+        if (!opts_ended && !strcmp(argv[i], "--")) { opts_ended = true; continue; }
+        if (!opts_ended) {
+            if (is_val_opt(argv[i])) { ++i; continue; }
+            if (is_flag_opt(argv[i])) continue;
+        }
         if (seen++ == index) return argv[i];
     }
     return "";
+}
+
+// Parse a complete integer within [min,max]. Rejects garbage, trailing text,
+// and out-of-range values, so no command ever acts on atoi()-style zeros.
+static bool to_long(const std::string& s, long min, long max, long* out) {
+    if (s.empty()) return false;
+    errno = 0;
+    char* end = nullptr;
+    long v = strtol(s.c_str(), &end, 10);
+    if (errno != 0 || end != s.c_str() + s.size() || v < min || v > max) return false;
+    *out = v;
+    return true;
 }
 
 static std::string resolve_target(int argc, char** argv) {
@@ -159,6 +183,36 @@ static std::string resolve_target(int argc, char** argv) {
 }
 
 static int fail(const char* kind, const std::string& msg, int code);  // defined below
+
+// Enforce the schema's argument contract before dispatch: unknown --options are
+// rejected instead of silently read as positionals, value options must have a
+// value, and numeric option values must parse within range.
+static int validate_options(int argc, char** argv) {
+    static const struct { const char* name; long min, max; } kNumericOpts[] = {
+        {"--steps", 0, 1000000}, {"--port", 0, 65535}, {"--interval-ms", 1, 3600000},
+        {"--scale", 1, 16}, {"--limit", 0, 1000000}, {"--offset", 0, 1000000},
+    };
+    for (int i = 2; i < argc; ++i) {
+        const char* a = argv[i];
+        if (!strcmp(a, "--")) break;
+        bool double_dash = a[0] == '-' && a[1] == '-';
+        if (!double_dash && strcmp(a, "-o") != 0) continue;   // free-form positional
+        if (!is_val_opt(a) && !is_flag_opt(a))
+            return fail("bad_args", std::string("unknown option '") + a + "' (see: esprite schema)", 2);
+        if (is_val_opt(a)) {
+            if (i + 1 >= argc)
+                return fail("bad_args", std::string("option '") + a + "' needs a value", 2);
+            for (auto& n : kNumericOpts) {
+                long v;
+                if (!strcmp(a, n.name) && !to_long(argv[i + 1], n.min, n.max, &v))
+                    return fail("bad_args", std::string("option '") + a + "' needs an integer " +
+                                std::to_string(n.min) + ".." + std::to_string(n.max), 2);
+            }
+            ++i;
+        }
+    }
+    return 0;
+}
 
 // Boots the resolved target. Returns 0 on success, or a non-zero exit code after
 // emitting the error envelope (2 for target problems).
@@ -274,6 +328,8 @@ int esprite_main(int argc, char** argv) {
     std::string cmd = argv[1];
 
     if (cmd == "schema") { printf("%s\n", kSchema); return 0; }
+    if (opt_flag(argc, argv, "--help")) { printf("%s\n", kSchema); return 0; }
+    if (int rc = validate_options(argc, argv)) return rc;
 
     if (cmd == "list-targets") {
         int offset = opt_val(argc, argv, "--offset") ? atoi(opt_val(argc, argv, "--offset")) : 0;
@@ -389,7 +445,15 @@ int esprite_main(int argc, char** argv) {
         return 0;
     }
 
-    // Remaining commands boot a target first.
+    // Remaining commands boot a target first. Validate the command name before
+    // resolving the target, so a typo'd command is reported as bad_args rather
+    // than a misleading target error.
+    static const char* kBootCommands[] = {"ui", "screenshot", "snapshot", "tap", "button",
+                                          "battery", "rotate", "gpio", "serial", "logs"};
+    bool known = false;
+    for (auto* k : kBootCommands) if (cmd == k) { known = true; break; }
+    if (!known)
+        return fail("bad_args", "unknown command '" + cmd + "' (try: esprite schema)", 2);
     if (boot_or_die(argc, argv) != 0) return 2;
 
     if (cmd == "ui") {
@@ -414,6 +478,9 @@ int esprite_main(int argc, char** argv) {
     }
     if (cmd == "snapshot") {
         std::string json = positional(argc, argv, 0);
+        JsonDocument body;
+        if (json.empty() || deserializeJson(body, json))
+            return fail("bad_args", "snapshot needs a valid JSON body", 2);
         bool ok = sim_wifi_post(opt_val(argc, argv, "--path") ? opt_val(argc, argv, "--path") : "/snapshot", json);
         if (!ok) return fail("post_failed", "snapshot not delivered (target server unbound/unreachable or body too large)", 6);
         sim_settle_ms();   // let the firmware render the injected data
@@ -433,8 +500,13 @@ int esprite_main(int argc, char** argv) {
                 return fail("ref_not_found", "no widget with ref " + ref + " in the current ui snapshot", 4);
             extra = ",\"ref\":\"" + json_esc(ref) + "\"";
         } else {
-            x = atoi(positional(argc, argv, 0).c_str());
-            y = atoi(positional(argc, argv, 1).c_str());
+            const BoardDesc* b = active_board();
+            long lx, ly;
+            if (!to_long(positional(argc, argv, 0), 0, b->width - 1, &lx) ||
+                !to_long(positional(argc, argv, 1), 0, b->height - 1, &ly))
+                return fail("bad_args", "tap needs x 0-" + std::to_string(b->width - 1) +
+                            " and y 0-" + std::to_string(b->height - 1), 2);
+            x = (int)lx; y = (int)ly;
         }
         sim_input().touch_pressed = true; sim_input().touch_x = x; sim_input().touch_y = y;
         sim_run_steps(4);
@@ -464,9 +536,12 @@ int esprite_main(int argc, char** argv) {
         return 0;
     }
     if (cmd == "battery") {
+        long pct;
+        if (!to_long(positional(argc, argv, 0), 0, 100, &pct))
+            return fail("bad_args", "battery needs a percentage 0-100", 2);
         if (!active_board() || !active_board()->has_battery)
             return fail("unsupported", "this board has no battery", 7);
-        sim_input().battery_pct = atoi(positional(argc, argv, 0).c_str());
+        sim_input().battery_pct = (int)pct;
         if (opt_flag(argc, argv, "--charging")) sim_input().charging = true;
         if (opt_flag(argc, argv, "--no-vbus"))  sim_input().vbus = false;
         sim_run_steps(5);
@@ -477,9 +552,12 @@ int esprite_main(int argc, char** argv) {
         return 0;
     }
     if (cmd == "rotate") {
+        long q;
+        if (!to_long(positional(argc, argv, 0), 0, 3, &q))
+            return fail("bad_args", "rotate needs a quadrant 0-3", 2);
         if (!active_board() || !active_board()->has_rotation)
             return fail("unsupported", "this board does not support rotation", 7);
-        sim_input().quadrant = atoi(positional(argc, argv, 0).c_str());
+        sim_input().quadrant = (int)q;
         sim_run_steps(5);
         maybe_shot(argc, argv);
         emit("{\"ok\":true,\"quadrant\":" + std::to_string(sim_input().quadrant) + "}",
@@ -487,9 +565,11 @@ int esprite_main(int argc, char** argv) {
         return 0;
     }
     if (cmd == "gpio") {
-        int pin = atoi(positional(argc, argv, 0).c_str());
-        int lvl = atoi(positional(argc, argv, 1).c_str());
-        sim_gpio_set(pin, lvl);
+        long pin, lvl;
+        if (!to_long(positional(argc, argv, 0), 0, 63, &pin) ||
+            !to_long(positional(argc, argv, 1), 0, 1, &lvl))
+            return fail("bad_args", "gpio needs a pin 0-63 and a level 0|1", 2);
+        sim_gpio_set((int)pin, (int)lvl);
         sim_run_steps(5);
         emit("{\"ok\":true,\"pin\":" + std::to_string(pin) + ",\"level\":" + std::to_string(lvl ? 1 : 0) + "}",
              "gpio " + std::to_string(pin) + "=" + std::to_string(lvl ? 1 : 0));
