@@ -5,6 +5,7 @@
 #include "scenario.h"
 #include "sim_input.h"
 #include "Print.h"
+#include "WebServer.h"
 #include <ArduinoJson.h>
 #include <cstdio>
 #include <cstring>
@@ -125,6 +126,13 @@ int esp32sim_main(int argc, char** argv) {
 
         const char* shot = opt_val(argc, argv, "--shot");
         const char* port = getenv("CLAWDSIM_HTTP_PORT");
+        // If the target ran an HTTP server but its bind failed (port in use), a
+        // live bridge could never reach it. Fail loudly instead of looping.
+        if (sim_http_bind_status() == 0) {
+            fprintf(stderr, "serve: failed to bind HTTP port %s (already in use?)\n",
+                    port ? port : "8080");
+            return 3;
+        }
         int interval = 1000;
         if (const char* iv = opt_val(argc, argv, "--interval-ms")) interval = atoi(iv);
         fprintf(stderr, "esp32sim: serving '%s' at http://127.0.0.1:%s/snapshot%s\n",

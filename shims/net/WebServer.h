@@ -31,3 +31,7 @@ private:
     std::string body_;
     int client_fd_ = -1;
 };
+
+// Bind status of the most recent WebServer::begin(): -1 = never started,
+// 0 = bind failed, >0 = bound on that port.
+int sim_http_bind_status();

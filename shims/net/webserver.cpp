@@ -13,6 +13,12 @@
 WiFiClass     WiFi;
 MDNSResponder MDNS;
 
+// Bind status of the most recent WebServer::begin(): -1 = never started,
+// 0 = bind failed (port in use), >0 = bound on that port. Lets the CLI detect a
+// failed bind before entering a long-running serve loop.
+static int g_bind_status = -1;
+int sim_http_bind_status() { return g_bind_status; }
+
 WebServer::~WebServer() {
     if (listen_fd_ >= 0) close(listen_fd_);
 }
@@ -35,10 +41,13 @@ void WebServer::begin() {
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = htons((uint16_t)bound_port_);
     if (bind(listen_fd_, (sockaddr*)&addr, sizeof(addr)) != 0) {
-        close(listen_fd_); listen_fd_ = -1; return;
+        close(listen_fd_); listen_fd_ = -1;
+        g_bind_status = 0;   // bind failed (port likely already in use)
+        return;
     }
     listen(listen_fd_, 8);
     fcntl(listen_fd_, F_SETFL, O_NONBLOCK);
+    g_bind_status = bound_port_;
 }
 
 void WebServer::handleClient() {
