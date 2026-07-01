@@ -19,6 +19,7 @@
 #include <vector>
 #include <thread>
 #include <chrono>
+#include <cctype>
 #include <unistd.h>
 
 static const int WARMUP_STEPS = 60;
@@ -128,18 +129,21 @@ static bool opt_flag(int argc, char** argv, const char* name) {
     return false;
 }
 
-// Positional args after the command, skipping options and their values.
+// Positional args after the command. Only *recognized* options are skipped, so
+// free-form positionals that start with a dash (e.g. `serial send -AT`, negative
+// coordinates) are preserved.
 static std::string positional(int argc, char** argv, int index) {
     static const char* val_opts[] = {"--target", "--steps", "--path", "--shot",
                                      "--port", "--interval-ms", "--scale", "--ref",
                                      "--output", "-o", "--limit", "--offset", "--fields"};
+    static const char* flag_opts[] = {"--charging", "--no-vbus", "--window"};
     int seen = 0;
     for (int i = 2; i < argc; ++i) {
-        bool is_opt = argv[i][0] == '-' && argv[i][1] == '-';
-        if (is_opt) {
-            for (auto* vo : val_opts) if (!strcmp(argv[i], vo)) { ++i; break; }
-            continue;
-        }
+        bool matched = false;
+        for (auto* vo : val_opts) if (!strcmp(argv[i], vo)) { ++i; matched = true; break; }
+        if (matched) continue;
+        for (auto* fo : flag_opts) if (!strcmp(argv[i], fo)) { matched = true; break; }
+        if (matched) continue;
         if (seen++ == index) return argv[i];
     }
     return "";
@@ -209,9 +213,18 @@ static void emit(const std::string& json, const std::string& text) {
 static std::string bounded_array(const std::string& arr, int offset, int limit) {
     std::vector<std::string> elems;
     int depth = 0; size_t start = std::string::npos;
+    bool in_str = false, esc = false;
     for (size_t i = 0; i < arr.size(); ++i) {
-        if (arr[i] == '{') { if (depth++ == 0) start = i; }
-        else if (arr[i] == '}') {
+        char c = arr[i];
+        if (esc) { esc = false; continue; }         // skip the char after a backslash
+        if (in_str) {
+            if (c == '\\') esc = true;
+            else if (c == '"') in_str = false;
+            continue;                                // braces inside strings don't count
+        }
+        if (c == '"') { in_str = true; }
+        else if (c == '{') { if (depth++ == 0) start = i; }
+        else if (c == '}') {
             if (--depth == 0 && start != std::string::npos) {
                 elems.push_back(arr.substr(start, i - start + 1)); start = std::string::npos;
             }
@@ -247,6 +260,7 @@ int esp32sim_main(int argc, char** argv) {
     if (cmd == "list-targets") {
         int offset = opt_val(argc, argv, "--offset") ? atoi(opt_val(argc, argv, "--offset")) : 0;
         int limit  = opt_val(argc, argv, "--limit")  ? atoi(opt_val(argc, argv, "--limit"))  : -1;
+        if (offset < 0) offset = 0;   // never index the registry out of bounds
         const char* fields = opt_val(argc, argv, "--fields");
         auto want = [&](const char* f) { return !fields || strstr(fields, f) != nullptr; };
         int total = sim_target_count();
