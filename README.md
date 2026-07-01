@@ -92,6 +92,39 @@ Scenarios are ordered JSON steps, useful in CI:
 }
 ```
 
+## Driving it (agent-facing)
+
+`esp32sim schema` prints the machine-readable clispec contract (commands, args,
+output fields, error kinds, exit codes). Commands emit JSON on stdout; logs go to
+stderr.
+
+For LVGL targets there is a **snapshot-ref model** like a browser page snapshot:
+
+```bash
+esp32sim ui --target clawdmeter
+# [{"ref":"e6","type":"bar","x":36,"y":168,"w":408,"h":24,"value":42}, ...]
+esp32sim tap --ref e6 --target clawdmeter     # tap that widget, not a pixel
+```
+
+`ui` returns the live widget tree (refs, type, coords, text, bar/arc values), so
+an agent reads the UI structurally instead of guessing pixels. `tap --ref` acts
+on a ref; `tap X Y` is the pixel fallback.
+
+The `run` daemon is a persistent session where refs from `ui` stay valid across
+the session:
+
+```
+{"cmd":"boot","target":"clawdmeter"}
+{"cmd":"snapshot","data":{"lim":1,"s5":42,"s7":10,"ctx":55,"cost":1.5,"model":"opus"}}
+{"cmd":"ui"}                              # read the updated tree, get refs
+{"cmd":"tap","ref":"e6"}                  # act on a ref
+{"cmd":"screenshot","out":"out.png"}
+{"cmd":"quit"}
+```
+
+Raw-GFX targets (no widget tree) return `[]` from `ui` and are driven by pixels +
+screenshots.
+
 ## How it works
 
 The firmware's own source files are compiled unchanged. Only two things are
