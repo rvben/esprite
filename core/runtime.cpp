@@ -19,6 +19,7 @@ bool sim_boot(const std::string& key) {
     for (auto cb : boot_hooks()) cb();   // per-subsystem boot reset (e.g. UI refs)
     sim_clock_reset();
     sim_esp_restart_reset();             // clear sticky restart flag for a clean boot
+    sim_gpio_reset();                    // clear injected GPIO levels for a clean boot
     // Default HTTP port for socket-backed webserver shims (targets can override
     // via the same env before boot).
     if (!getenv("CLAWDSIM_HTTP_PORT")) setenv("CLAWDSIM_HTTP_PORT", "8080", 1);

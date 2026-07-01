@@ -13,6 +13,7 @@ void sim_clock_advance(uint32_t ms) { g_now_ms += ms; }
 static int g_gpio[64] = {0};
 int  sim_gpio_get(int pin) { return (pin >= 0 && pin < 64) ? g_gpio[pin] : 0; }
 void sim_gpio_set(int pin, int level) { if (pin >= 0 && pin < 64) g_gpio[pin] = level ? 1 : 0; }
+void sim_gpio_reset() { for (int& p : g_gpio) p = 0; }
 
 void pinMode(int, int) {}
 void digitalWrite(int pin, int level) { sim_gpio_set(pin, level); }

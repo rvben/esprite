@@ -46,6 +46,7 @@ inline int analogRead(int) { return 0; }
 // them, so standard-library sketches that poll pins work in the sim.
 int  sim_gpio_get(int pin);
 void sim_gpio_set(int pin, int level);
+void sim_gpio_reset();   // clear all injected pin levels (called on each sim_boot)
 
 // ---- Flash-string / PROGMEM no-ops -----------------------------------------
 #define F(x) (x)
