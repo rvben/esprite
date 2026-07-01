@@ -16,4 +16,9 @@ SimWindow* sim_window_open(const char* title, int w, int h, int scale);
 // Returns false when the user closes the window (or presses Escape).
 bool sim_window_tick(SimWindow* win);
 
+// Request a PNG of the FULL window (device screen + button bezel), written on
+// the next tick. This captures what the user sees, unlike the device-only
+// screenshot. No-op if win is null.
+void sim_window_request_capture(SimWindow* win, const char* path);
+
 void sim_window_close(SimWindow* win);

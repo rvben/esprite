@@ -174,7 +174,11 @@ int esp32sim_main(int argc, char** argv) {
             if (shot) {
                 auto now = std::chrono::steady_clock::now();
                 if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last).count() >= interval) {
-                    sim_screenshot_png(shot);
+#ifdef HAVE_SDL2
+                    if (win) sim_window_request_capture(win, shot);   // full window (with buttons)
+                    else
+#endif
+                    sim_screenshot_png(shot);                          // device only
                     last = now;
                 }
             }
