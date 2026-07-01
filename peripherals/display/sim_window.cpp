@@ -28,7 +28,8 @@ struct SimWindow {
     int  w = 0, h = 0, scale = 1, chrome = 0, strip = 0;
     bool vsync = false;
     bool touching = false;
-    int  mouse_held = -1;
+    int  mouse_held = -1;      // physical button index the mouse is holding, or -1
+    bool key_held[MAX_BTN]{};  // per-button keyboard hold state (a button can be held by both)
     int  pwr_flash = 0;
     int  nbtn = 0;
     WinBtn btns[MAX_BTN];
@@ -251,7 +252,7 @@ bool sim_window_tick(SimWindow* win) {
                 } else {
                     for (int i = 0; i < win->nbtn; ++i)
                         if (in_rect(win->btns[i].r, (int)lx, (int)ly)) {
-                            press_action(win, win->btns[i].def);
+                            press_action(win, win->btns[i].def);  // idempotent for held state
                             win->mouse_held = i;
                             break;
                         }
@@ -263,8 +264,10 @@ bool sim_window_tick(SimWindow* win) {
                 if (win->touching) { win->touching = false; sim_input().touch_pressed = false; }
                 win->bat_dragging = false;
                 if (win->mouse_held >= 0) {
-                    release_action(win->btns[win->mouse_held].def);
+                    int i = win->mouse_held;
                     win->mouse_held = -1;
+                    // Don't clear a button the keyboard is still holding.
+                    if (!win->key_held[i]) release_action(win->btns[i].def);
                 }
             }
             break;
@@ -282,14 +285,19 @@ bool sim_window_tick(SimWindow* win) {
             if (!e.key.repeat)
                 for (int i = 0; i < win->nbtn; ++i)
                     if (win->btns[i].def->key &&
-                        e.key.keysym.sym == (SDL_Keycode)(unsigned char)win->btns[i].def->key)
-                        press_action(win, win->btns[i].def);
+                        e.key.keysym.sym == (SDL_Keycode)(unsigned char)win->btns[i].def->key) {
+                        win->key_held[i] = true;
+                        press_action(win, win->btns[i].def);  // idempotent for held state
+                    }
             break;
         case SDL_KEYUP:
             for (int i = 0; i < win->nbtn; ++i)
                 if (win->btns[i].def->key &&
-                    e.key.keysym.sym == (SDL_Keycode)(unsigned char)win->btns[i].def->key)
-                    release_action(win->btns[i].def);
+                    e.key.keysym.sym == (SDL_Keycode)(unsigned char)win->btns[i].def->key) {
+                    win->key_held[i] = false;
+                    // Don't clear a button the mouse is still holding.
+                    if (win->mouse_held != i) release_action(win->btns[i].def);
+                }
             break;
         default: break;
         }
