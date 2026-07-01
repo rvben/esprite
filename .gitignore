@@ -1,0 +1,7 @@
+build/
+*.png
+!docs/**/*.png
+.DS_Store
+_deps/
+CMakeCache.txt
+CMakeFiles/
