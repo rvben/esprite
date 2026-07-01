@@ -20,3 +20,11 @@ int  digitalRead(int pin) { return sim_gpio_get(pin); }
 
 TwoWire  Wire;
 EspClass ESP;
+
+static bool g_esp_restart = false;
+void EspClass::restart() {
+    Serial.println("ESP: restart requested");
+    g_esp_restart = true;
+}
+bool sim_esp_restart_requested() { return g_esp_restart; }
+void sim_esp_restart_reset() { g_esp_restart = false; }

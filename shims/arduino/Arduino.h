@@ -75,13 +75,19 @@ private:
     std::string s_;
 };
 
-// Minimal ESP system object (ESP.restart(), ESP.getFreeHeap()).
+// Minimal ESP system object. restart() cannot faithfully reboot the process mid
+// call-stack, so it records the request (observable via serial and the query
+// below) instead of silently doing nothing; a driver can assert the firmware
+// reached its restart/forget path.
 class EspClass {
 public:
-    void     restart() {}
+    void     restart();
     uint32_t getFreeHeap() { return 200000; }
 };
 extern EspClass ESP;
+
+bool sim_esp_restart_requested();   // true once ESP.restart() has been called
+void sim_esp_restart_reset();       // clear the flag (called on each sim_boot)
 
 // strlcpy is BSD libc (present on macOS). Provide a fallback elsewhere.
 #if defined(__linux__)
