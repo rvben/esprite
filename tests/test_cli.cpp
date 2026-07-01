@@ -110,6 +110,41 @@ TEST_CASE("a bare -- ends option parsing for free-form positionals") {
     CHECK(run_cli({"esprite", "serial", "send", "--weird", "--target", "sample_gfx"}) == 2);
 }
 
+static void write_file(const char* path, const char* content) {
+    FILE* f = fopen(path, "w");
+    REQUIRE(f != nullptr);
+    fputs(content, f);
+    fclose(f);
+}
+
+TEST_CASE("scenario errors use the same envelope and exit codes as the CLI") {
+    std::string err;
+
+    // Regression: a missing file printed bare text and never emitted the
+    // structured envelope every other command path produces.
+    CHECK(run_cli_err({"esprite", "scenario", "/nonexistent-scenario.json"}, &err) == 2);
+    CHECK(err.find("\"kind\":\"bad_args\"") != std::string::npos);
+
+    // Regression: an undeliverable snapshot step exited 3, while the schema
+    // documents post_failed as exit 6 (and the one-shot command honors that).
+    write_file("/tmp/esprite_scn_post.json",
+               "{\"target\":\"cyd\",\"steps\":[{\"cmd\":\"snapshot\",\"data\":{\"a\":1}}]}");
+    CHECK(run_cli_err({"esprite", "scenario", "/tmp/esprite_scn_post.json"}, &err) == 6);
+    CHECK(err.find("\"kind\":\"post_failed\"") != std::string::npos);
+    std::remove("/tmp/esprite_scn_post.json");
+}
+
+TEST_CASE("scenario steps respect board capabilities like the other dialects") {
+    // Regression: a scenario could set battery or rotation on a board with
+    // neither and exit 0; the one-shot and run dialects reject with exit 7.
+    std::string err;
+    write_file("/tmp/esprite_scn_cap.json",
+               "{\"target\":\"cyd\",\"steps\":[{\"cmd\":\"battery\",\"pct\":50}]}");
+    CHECK(run_cli_err({"esprite", "scenario", "/tmp/esprite_scn_cap.json"}, &err) == 7);
+    CHECK(err.find("\"kind\":\"unsupported\"") != std::string::npos);
+    std::remove("/tmp/esprite_scn_cap.json");
+}
+
 TEST_CASE("serial expect with an invalid regex is bad_args, not a crash") {
     // Regression: a malformed pattern threw std::regex_error out of esprite_main
     // and aborted the whole process instead of reporting a structured error.

@@ -1,4 +1,6 @@
 #include "cli.h"
+#include "cli_internal.h"
+#include "actions.h"
 #include "runtime.h"
 #include "target.h"
 #include "screenshot.h"
@@ -108,7 +110,7 @@ static const char* kSchema = R"JSON({
     { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless.", "mutating": true, "stability": "stable",
       "args": [ { "name": "file", "description": "Scenario JSON path.", "type": "string", "required": true } ] },
     { "name": "serve", "description": "Boot and keep pumping so a live bridge can POST; --window opens an interactive SDL window (mouse=touch, on-screen buttons + battery/USB/rotate controls). Human logs on stderr.", "mutating": true, "stability": "stable" },
-    { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), button, battery, rotate, gpio, snapshot, screenshot, steps, serial, logs, quit. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
+    { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), button, battery, rotate, gpio, snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
   ],
   "errors": [
     { "kind": "no_target", "description": "No --target and more than one target registered.", "exit_code": 2 },
@@ -164,25 +166,12 @@ static std::string positional(int argc, char** argv, int index) {
     return "";
 }
 
-// Parse a complete integer within [min,max]. Rejects garbage, trailing text,
-// and out-of-range values, so no command ever acts on atoi()-style zeros.
-static bool to_long(const std::string& s, long min, long max, long* out) {
-    if (s.empty()) return false;
-    errno = 0;
-    char* end = nullptr;
-    long v = strtol(s.c_str(), &end, 10);
-    if (errno != 0 || end != s.c_str() + s.size() || v < min || v > max) return false;
-    *out = v;
-    return true;
-}
 
 static std::string resolve_target(int argc, char** argv) {
     if (const char* t = opt_val(argc, argv, "--target")) return t;
     if (sim_target_count() == 1) return sim_target_at(0)->key;
     return "";
 }
-
-static int fail(const char* kind, const std::string& msg, int code);  // defined below
 
 // Enforce the schema's argument contract before dispatch: unknown --options are
 // rejected instead of silently read as positionals, value options must have a
@@ -229,41 +218,6 @@ static int boot_or_die(int argc, char** argv) {
 static void maybe_shot(int argc, char** argv) {
     if (const char* out = opt_val(argc, argv, "--shot")) sim_screenshot_png(out);
 }
-
-// The active board's hardware description (set once a target is booted).
-static const BoardDesc* active_board() {
-    const SimTarget* t = sim_active_target();
-    return t ? t->board : nullptr;
-}
-// Whether the active board has a physical control with the given action, so
-// capability-bound commands (button/battery/rotate) can reject faithfully.
-static bool board_has_action(SimInputAction act) {
-    const BoardDesc* b = active_board();
-    if (!b) return false;
-    for (int i = 0; i < b->button_count; ++i)
-        if (b->buttons[i].action == act) return true;
-    return false;
-}
-
-
-// JSON-escape a string into out (for structured stdout results).
-static std::string json_esc(const std::string& s) {
-    std::string o;
-    for (unsigned char c : s) {
-        switch (c) {
-        case '"':  o += "\\\""; break;
-        case '\\': o += "\\\\"; break;
-        case '\n': o += "\\n";  break;
-        case '\r': o += "\\r";  break;
-        case '\t': o += "\\t";  break;
-        default:
-            if (c < 0x20) { char b[8]; snprintf(b, sizeof(b), "\\u%04x", c); o += b; }
-            else o += (char)c;
-        }
-    }
-    return o;
-}
-static const char* jbool(bool b) { return b ? "true" : "false"; }
 
 // Output mode: JSON when piped or forced with --output json; text on a TTY or
 // with --output text. Explicit --output wins over TTY detection.
@@ -313,12 +267,6 @@ static std::string bounded_array(const std::string& arr, int offset, int limit) 
            ",\"offset\":" + std::to_string(offset) + ",\"count\":" + std::to_string(shown) +
            ",\"truncated\":" + jbool(truncated) + "}";
 }
-// Structured error envelope as the last line of stderr; returns the exit code.
-static int fail(const char* kind, const std::string& msg, int code) {
-    fprintf(stderr, "{\"error\":{\"kind\":\"%s\",\"message\":\"%s\"}}\n", kind, json_esc(msg).c_str());
-    return code;
-}
-
 int esprite_main(int argc, char** argv) {
     set_output_mode(argc, argv);
     if (argc < 2 || !strcmp(argv[1], "--help") || !strcmp(argv[1], "help")) {
@@ -500,17 +448,13 @@ int esprite_main(int argc, char** argv) {
                 return fail("ref_not_found", "no widget with ref " + ref + " in the current ui snapshot", 4);
             extra = ",\"ref\":\"" + json_esc(ref) + "\"";
         } else {
-            const BoardDesc* b = active_board();
             long lx, ly;
-            if (!to_long(positional(argc, argv, 0), 0, b->width - 1, &lx) ||
-                !to_long(positional(argc, argv, 1), 0, b->height - 1, &ly))
-                return fail("bad_args", "tap needs x 0-" + std::to_string(b->width - 1) +
-                            " and y 0-" + std::to_string(b->height - 1), 2);
+            if (!to_long(positional(argc, argv, 0), 0, 100000, &lx) ||
+                !to_long(positional(argc, argv, 1), 0, 100000, &ly))
+                return fail("bad_args", "tap needs integer x y coordinates (or --ref)", 2);
             x = (int)lx; y = (int)ly;
         }
-        sim_input().touch_pressed = true; sim_input().touch_x = x; sim_input().touch_y = y;
-        sim_run_steps(4);
-        sim_input().touch_pressed = false; sim_run_steps(4);
+        if (ActionError e = apply_tap(x, y)) return fail(e.kind, e.msg, kind_exit(e.kind));
         maybe_shot(argc, argv);
         emit("{\"ok\":true" + extra + ",\"x\":" + std::to_string(x) + ",\"y\":" + std::to_string(y) + "}",
              "tapped " + std::to_string(x) + "," + std::to_string(y));
@@ -518,19 +462,7 @@ int esprite_main(int argc, char** argv) {
     }
     if (cmd == "button") {
         std::string which = positional(argc, argv, 0);
-        if (which != "primary" && which != "secondary" && which != "pwr")
-            return fail("bad_args", "button takes primary|secondary|pwr", 2);
-        SimInputAction act = (which == "pwr")       ? ACT_PWR
-                           : (which == "secondary") ? ACT_SECONDARY
-                                                    : ACT_PRIMARY;
-        if (!board_has_action(act))
-            return fail("unsupported", "this board has no '" + which + "' button", 7);
-        if (which == "pwr") { sim_input().pwr_events.push_back(1); sim_run_steps(5); }
-        else {
-            int idx = (which == "secondary") ? 1 : 0;
-            sim_input().button[idx] = true;  sim_run_steps(5);
-            sim_input().button[idx] = false; sim_run_steps(3);
-        }
+        if (ActionError e = apply_button(which)) return fail(e.kind, e.msg, kind_exit(e.kind));
         maybe_shot(argc, argv);
         emit("{\"ok\":true,\"button\":\"" + json_esc(which) + "\"}", "pressed " + which);
         return 0;
@@ -539,12 +471,11 @@ int esprite_main(int argc, char** argv) {
         long pct;
         if (!to_long(positional(argc, argv, 0), 0, 100, &pct))
             return fail("bad_args", "battery needs a percentage 0-100", 2);
-        if (!active_board() || !active_board()->has_battery)
-            return fail("unsupported", "this board has no battery", 7);
-        sim_input().battery_pct = (int)pct;
-        if (opt_flag(argc, argv, "--charging")) sim_input().charging = true;
-        if (opt_flag(argc, argv, "--no-vbus"))  sim_input().vbus = false;
-        sim_run_steps(5);
+        static const bool kOn = true, kOff = false;
+        const bool* charging = opt_flag(argc, argv, "--charging") ? &kOn  : nullptr;
+        const bool* vbus     = opt_flag(argc, argv, "--no-vbus")  ? &kOff : nullptr;
+        if (ActionError e = apply_battery((int)pct, charging, vbus))
+            return fail(e.kind, e.msg, kind_exit(e.kind));
         maybe_shot(argc, argv);
         emit("{\"ok\":true,\"pct\":" + std::to_string(sim_input().battery_pct) + ",\"charging\":" +
              jbool(sim_input().charging) + ",\"vbus\":" + jbool(sim_input().vbus) + "}",
@@ -553,12 +484,9 @@ int esprite_main(int argc, char** argv) {
     }
     if (cmd == "rotate") {
         long q;
-        if (!to_long(positional(argc, argv, 0), 0, 3, &q))
+        if (!to_long(positional(argc, argv, 0), -1000, 1000, &q))
             return fail("bad_args", "rotate needs a quadrant 0-3", 2);
-        if (!active_board() || !active_board()->has_rotation)
-            return fail("unsupported", "this board does not support rotation", 7);
-        sim_input().quadrant = (int)q;
-        sim_run_steps(5);
+        if (ActionError e = apply_rotate((int)q)) return fail(e.kind, e.msg, kind_exit(e.kind));
         maybe_shot(argc, argv);
         emit("{\"ok\":true,\"quadrant\":" + std::to_string(sim_input().quadrant) + "}",
              "quadrant " + std::to_string(sim_input().quadrant));
@@ -566,11 +494,10 @@ int esprite_main(int argc, char** argv) {
     }
     if (cmd == "gpio") {
         long pin, lvl;
-        if (!to_long(positional(argc, argv, 0), 0, 63, &pin) ||
-            !to_long(positional(argc, argv, 1), 0, 1, &lvl))
+        if (!to_long(positional(argc, argv, 0), -1000, 1000, &pin) ||
+            !to_long(positional(argc, argv, 1), -1000, 1000, &lvl))
             return fail("bad_args", "gpio needs a pin 0-63 and a level 0|1", 2);
-        sim_gpio_set((int)pin, (int)lvl);
-        sim_run_steps(5);
+        if (ActionError e = apply_gpio((int)pin, (int)lvl)) return fail(e.kind, e.msg, kind_exit(e.kind));
         emit("{\"ok\":true,\"pin\":" + std::to_string(pin) + ",\"level\":" + std::to_string(lvl ? 1 : 0) + "}",
              "gpio " + std::to_string(pin) + "=" + std::to_string(lvl ? 1 : 0));
         return 0;
@@ -601,6 +528,12 @@ int esprite_main(int argc, char** argv) {
     return fail("bad_args", "unknown command '" + cmd + "' (try: esprite schema)", 2);
 }
 
+// One error reply on the session stream, same kind/message envelope as the
+// one-shot CLI's stderr errors.
+static void session_err(FILE* out, const char* kind, const std::string& msg) {
+    fprintf(out, "{\"error\":{\"kind\":\"%s\",\"message\":\"%s\"}}\n", kind, json_esc(msg).c_str());
+}
+
 // Daemon: a persistent agent session. Read newline-delimited JSON commands from
 // `in`, emit one JSON reply per line on `out`. Refs from {"cmd":"ui"} stay valid
 // for {"cmd":"tap","ref":...} within the session (the snapshot-ref model).
@@ -609,17 +542,40 @@ int esprite_daemon(FILE* in, FILE* out) {
     char line[16384];
     bool booted = false;
     while (fgets(line, sizeof(line), in)) {
+        // A line beyond the buffer would otherwise be parsed as two commands,
+        // desyncing 1-in/1-out reply pairing. Drain it and reply with one error.
+        if (!strchr(line, '\n') && !feof(in)) {
+            int c;
+            while ((c = fgetc(in)) != EOF && c != '\n') {}
+            session_err(out, "bad_args", "line too long (max " + std::to_string(sizeof(line) - 1) + " bytes)");
+            fflush(out);
+            continue;
+        }
         JsonDocument doc;
-        if (deserializeJson(doc, line)) { fprintf(out, "{\"error\":\"bad_json\"}\n"); fflush(out); continue; }
+        if (deserializeJson(doc, line)) {
+            session_err(out, "bad_args", "line is not valid JSON");
+            fflush(out);
+            continue;
+        }
         std::string cmd = doc["cmd"] | "";
 
         if (cmd == "boot") {
-            std::string t = doc["target"] | "";
-            booted = sim_boot(t);
-            if (booted) sim_run_steps(WARMUP_STEPS);   // sim_boot resets UI refs
-            fprintf(out, "{\"ok\":%s}\n", jbool(booted));
+            // One boot per session: re-running a firmware's setup() duplicates
+            // its UI state, and lv_init cannot run twice in one process.
+            if (booted) {
+                session_err(out, "already_booted", "one boot per run session; start a new session to boot again");
+            } else {
+                std::string t = doc["target"] | "";
+                booted = sim_boot(t);
+                if (booted) {
+                    sim_run_steps(WARMUP_STEPS);   // sim_boot resets UI refs
+                    fprintf(out, "{\"ok\":true}\n");
+                } else {
+                    session_err(out, "unknown_target", "unknown target '" + t + "'");
+                }
+            }
         } else if (!booted) {
-            fprintf(out, "{\"error\":\"not_booted\"}\n");
+            session_err(out, "not_booted", "boot a target first");
         } else if (cmd == "ui") {
             fprintf(out, "%s\n", lvgl_snapshot_json().c_str());
         } else if (cmd == "screenshot") {
@@ -633,52 +589,34 @@ int esprite_daemon(FILE* in, FILE* out) {
             if (doc["ref"].is<const char*>()) {
                 std::string ref = doc["ref"] | "";
                 if (!lvgl_ref_center(ref, &x, &y)) {
-                    fprintf(out, "{\"ok\":false,\"error\":\"ref_not_found\"}\n"); fflush(out); continue;
+                    session_err(out, "ref_not_found", "no widget with ref " + ref + " in the current ui snapshot");
+                    fflush(out);
+                    continue;
                 }
             } else { x = doc["x"] | 0; y = doc["y"] | 0; }
-            sim_input().touch_pressed = true; sim_input().touch_x = x; sim_input().touch_y = y;
-            sim_run_steps(4);
-            sim_input().touch_pressed = false; sim_run_steps(4);
-            fprintf(out, "{\"ok\":true,\"x\":%d,\"y\":%d}\n", x, y);
+            if (ActionError e = apply_tap(x, y)) session_err(out, e.kind, e.msg);
+            else fprintf(out, "{\"ok\":true,\"x\":%d,\"y\":%d}\n", x, y);
         } else if (cmd == "button") {
-            std::string which = doc["which"] | "primary";
-            SimInputAction act = (which == "pwr")       ? ACT_PWR
-                               : (which == "secondary") ? ACT_SECONDARY
-                                                        : ACT_PRIMARY;
-            if (!board_has_action(act)) {
-                fprintf(out, "{\"ok\":false,\"error\":\"unsupported\"}\n");
-            } else {
-                if (which == "pwr") { sim_input().pwr_events.push_back(1); sim_run_steps(5); }
-                else {
-                    int idx = (which == "secondary") ? 1 : 0;
-                    sim_input().button[idx] = true;  sim_run_steps(5);
-                    sim_input().button[idx] = false; sim_run_steps(3);
-                }
-                fprintf(out, "{\"ok\":true}\n");
-            }
+            if (ActionError e = apply_button(doc["which"] | "primary")) session_err(out, e.kind, e.msg);
+            else fprintf(out, "{\"ok\":true}\n");
         } else if (cmd == "battery") {
-            if (!active_board() || !active_board()->has_battery) {
-                fprintf(out, "{\"ok\":false,\"error\":\"unsupported\"}\n");
-            } else {
-                sim_input().battery_pct = doc["pct"] | 75;
-                if (doc["charging"].is<bool>()) sim_input().charging = doc["charging"];
-                if (doc["vbus"].is<bool>())     sim_input().vbus = doc["vbus"];
-                sim_run_steps(5);
-                fprintf(out, "{\"ok\":true}\n");
-            }
+            bool charging = doc["charging"] | false, vbus = doc["vbus"] | true;
+            if (ActionError e = apply_battery(doc["pct"] | 75,
+                                              doc["charging"].is<bool>() ? &charging : nullptr,
+                                              doc["vbus"].is<bool>() ? &vbus : nullptr))
+                session_err(out, e.kind, e.msg);
+            else fprintf(out, "{\"ok\":true}\n");
         } else if (cmd == "rotate") {
-            if (!active_board() || !active_board()->has_rotation) {
-                fprintf(out, "{\"ok\":false,\"error\":\"unsupported\"}\n");
-            } else {
-                sim_input().quadrant = doc["q"] | 0; sim_run_steps(5); fprintf(out, "{\"ok\":true}\n");
-            }
+            if (ActionError e = apply_rotate(doc["q"] | 0)) session_err(out, e.kind, e.msg);
+            else fprintf(out, "{\"ok\":true}\n");
         } else if (cmd == "gpio") {
-            sim_gpio_set(doc["pin"] | 0, doc["level"] | 0); sim_run_steps(5); fprintf(out, "{\"ok\":true}\n");
+            if (ActionError e = apply_gpio(doc["pin"] | 0, doc["level"] | 0)) session_err(out, e.kind, e.msg);
+            else fprintf(out, "{\"ok\":true}\n");
         } else if (cmd == "snapshot") {
             std::string body; serializeJson(doc["data"], body);
             bool ok = sim_wifi_post(doc["path"] | "/snapshot", body);
             if (ok) { sim_settle_ms(); fprintf(out, "{\"ok\":true}\n"); }
-            else fprintf(out, "{\"ok\":false,\"error\":\"post_failed\"}\n");
+            else session_err(out, "post_failed", "snapshot not delivered (target server unbound/unreachable or body too large)");
         } else if (cmd == "steps") {
             sim_run_steps(doc["n"] | 10); fprintf(out, "{\"ok\":true}\n");
         } else if (cmd == "serial") {
@@ -689,18 +627,18 @@ int esprite_daemon(FILE* in, FILE* out) {
             } else if (sub == "expect") {
                 std::string rx = doc["regex"] | "";
                 if (!sim_serial_regex_valid(rx)) {
-                    fprintf(out, "{\"error\":\"bad_regex\"}\n");
+                    session_err(out, "bad_args", "invalid regex '" + rx + "'");
                 } else {
                     sim_run_steps(WARMUP_STEPS);
                     fprintf(out, "{\"matched\":%s}\n", jbool(sim_serial_contains(rx)));
                 }
-            } else fprintf(out, "{\"error\":\"serial_sub\"}\n");
+            } else session_err(out, "bad_args", "serial takes sub send|expect");
         } else if (cmd == "logs") {
             fprintf(out, "{\"serial\":\"%s\"}\n", json_esc(sim_serial_output()).c_str());
         } else if (cmd == "quit" || cmd == "exit") {
             break;
         } else {
-            fprintf(out, "{\"error\":\"unknown_cmd\"}\n");
+            session_err(out, "bad_args", "unknown cmd '" + cmd + "'");
         }
         fflush(out);
     }

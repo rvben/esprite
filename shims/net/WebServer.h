@@ -26,7 +26,7 @@ struct HTTPUpload {
 class WebServer {
 public:
     typedef std::function<void()> Handler;
-    explicit WebServer(int port) : port_(port) {}
+    explicit WebServer(int port);
     ~WebServer();
     void on(const char* path, int method, Handler h);
     // Upload form (e.g. OTA /update): finishFn runs when the request completes;

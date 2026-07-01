@@ -170,7 +170,7 @@ foreach(_t waveshare_amoled_216_c6 waveshare_amoled_18 sample_gfx cyd cyd_tft)
 endforeach()
 
 # Shared CLI implementation, linked by both the binary and the test runner.
-add_library(cli_lib STATIC cli/cli.cpp cli/scenario.cpp)
+add_library(cli_lib STATIC cli/cli.cpp cli/scenario.cpp cli/actions.cpp)
 target_include_directories(cli_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/cli)
 target_link_libraries(cli_lib PUBLIC core peripherals lvgl_glue ArduinoJson)
 if(SDL2_FOUND)

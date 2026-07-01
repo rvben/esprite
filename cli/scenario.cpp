@@ -1,4 +1,6 @@
 #include "scenario.h"
+#include "cli_internal.h"
+#include "actions.h"
 #include "runtime.h"
 #include "target.h"
 #include "screenshot.h"
@@ -18,29 +20,21 @@
 // buffer (16 KB) so a bounded body is received whole. Snapshots are tiny.
 static const size_t MAX_REQUEST = 15000;
 
-static int http_port() {
-    // Prefer the port the target actually bound (authoritative, and the only way
-    // to reach an ephemeral bind); fall back to the requested env value.
-    int bound = sim_http_bind_status();
-    if (bound > 0) return bound;
-    const char* p = getenv("ESPRITE_HTTP_PORT");
-    return p ? atoi(p) : 8080;
-}
-
 bool sim_wifi_post(const std::string& path, const std::string& body) {
-    // If the target's own HTTP server failed to bind (its port was already in
-    // use), a connect here could reach that unrelated listener and complete the
-    // send, making an undelivered post look successful. Refuse in that case so
-    // the caller reports failure rather than a false positive.
-    if (sim_http_bind_status() == 0) {
-        fprintf(stderr, "sim_wifi_post: target HTTP server not bound (port in use); dropped\n");
+    // Deliver only to the port the active target actually bound. If it never
+    // started a server (-1) or its bind failed (0), a connect against the
+    // configured port could reach an unrelated host process and make an
+    // undelivered post look successful. Refuse instead.
+    int port = sim_http_bind_status();
+    if (port <= 0) {
+        fprintf(stderr, "sim_wifi_post: target has no bound HTTP server; dropped\n");
         return false;
     }
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in a{};
     a.sin_family = AF_INET;
     a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    a.sin_port = htons((uint16_t)http_port());
+    a.sin_port = htons((uint16_t)port);
     // Enlarge the send buffer so a bounded request always fits without blocking
     // (the server is single-threaded and only drains after this returns).
     int sndbuf = 65536;
@@ -78,56 +72,61 @@ bool sim_wifi_post(const std::string& path, const std::string& body) {
 
 int scenario_run(const std::string& path, const std::string& default_target) {
     std::ifstream f(path);
-    if (!f) { fprintf(stderr, "scenario: cannot open %s\n", path.c_str()); return 2; }
+    if (!f) return fail("bad_args", "scenario: cannot open " + path, 2);
     std::stringstream ss; ss << f.rdbuf();
 
     JsonDocument doc;
-    if (deserializeJson(doc, ss.str())) { fprintf(stderr, "scenario: bad JSON\n"); return 2; }
+    if (deserializeJson(doc, ss.str()))
+        return fail("bad_args", "scenario: " + path + " is not valid JSON", 2);
 
     std::string target = doc["target"] | default_target.c_str();
-    if (!sim_boot(target)) { fprintf(stderr, "scenario: unknown target '%s'\n", target.c_str()); return 2; }
+    if (!sim_boot(target)) return fail("unknown_target", "unknown target '" + target + "'", 2);
     sim_run_steps(60);
 
-    int failures = 0;
+    // Run every step; remember the first failure and report it as the result,
+    // with the same kind/message envelope and exit codes as the other dialects.
+    int step_no = 0, failures = 0;
+    std::string first_kind, first_msg;
+    auto step_failed = [&](const std::string& kind, const std::string& msg) {
+        fprintf(stderr, "scenario: step %d failed: %s\n", step_no, msg.c_str());
+        if (!failures++) { first_kind = kind; first_msg = msg; }
+    };
+
     for (JsonObject step : doc["steps"].as<JsonArray>()) {
+        ++step_no;
         const char* cmd = step["cmd"];
         if (!cmd) continue;
         if (!strcmp(cmd, "snapshot")) {
             std::string body; serializeJson(step["data"], body);
-            if (!sim_wifi_post(step["path"] | "/snapshot", body)) {
-                fprintf(stderr, "scenario: snapshot step not delivered (dropped)\n");
-                ++failures;
-            } else {
+            if (!sim_wifi_post(step["path"] | "/snapshot", body))
+                step_failed("post_failed", "snapshot step not delivered (dropped)");
+            else
                 sim_settle_ms();   // let the firmware render the injected data
-            }
         } else if (!strcmp(cmd, "screenshot")) {
             sim_settle_ms();       // capture a settled frame, whatever ran before
             sim_screenshot_png(step["out"] | "esprite.png");
         } else if (!strcmp(cmd, "steps")) {
             sim_run_steps(step["n"] | 10);
         } else if (!strcmp(cmd, "battery")) {
-            sim_input().battery_pct = step["pct"] | 75;
-            sim_input().charging    = step["charging"] | false;
-            sim_run_steps(5);
+            bool charging = step["charging"] | false;
+            if (ActionError e = apply_battery(step["pct"] | 75,
+                                              step["charging"].is<bool>() ? &charging : nullptr, nullptr))
+                step_failed(e.kind, e.msg);
         } else if (!strcmp(cmd, "button")) {
-            const char* which = step["which"] | "primary";
-            if (!strcmp(which, "pwr")) sim_input().pwr_events.push_back(1);
-            else sim_input().button[strcmp(which, "secondary") == 0 ? 1 : 0] = true;
-            sim_run_steps(5);
-            if (strcmp(which, "pwr") != 0)
-                sim_input().button[strcmp(which, "secondary") == 0 ? 1 : 0] = false;
-            sim_run_steps(3);
+            if (ActionError e = apply_button(step["which"] | "primary")) step_failed(e.kind, e.msg);
         } else if (!strcmp(cmd, "tap")) {
-            sim_input().touch_pressed = true;
-            sim_input().touch_x = step["x"] | 0;
-            sim_input().touch_y = step["y"] | 0;
-            sim_run_steps(4);
-            sim_input().touch_pressed = false;
-            sim_run_steps(4);
+            if (ActionError e = apply_tap(step["x"] | 0, step["y"] | 0)) step_failed(e.kind, e.msg);
         } else if (!strcmp(cmd, "rotate")) {
-            sim_input().quadrant = step["q"] | 0;
-            sim_run_steps(5);
+            if (ActionError e = apply_rotate(step["q"] | 0)) step_failed(e.kind, e.msg);
+        } else if (!strcmp(cmd, "gpio")) {
+            if (ActionError e = apply_gpio(step["pin"] | 0, step["level"] | 0)) step_failed(e.kind, e.msg);
+        } else {
+            step_failed("bad_args", std::string("unknown step cmd '") + cmd + "'");
         }
     }
-    return failures ? 3 : 0;   // non-zero if any snapshot step was dropped
+    if (failures)
+        return fail(first_kind.c_str(),
+                    std::to_string(failures) + " step(s) failed, first: " + first_msg,
+                    kind_exit(first_kind));
+    return 0;
 }

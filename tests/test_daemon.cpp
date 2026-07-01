@@ -21,6 +21,45 @@ static std::string run_daemon(const std::string& input) {
     return reply;
 }
 
+// Count newline-terminated replies.
+static int reply_count(const std::string& out) {
+    int n = 0;
+    for (char c : out) if (c == '\n') ++n;
+    return n;
+}
+
+TEST_CASE("run session: error replies use the kind/message envelope of the one-shot CLI") {
+    // Regression: the session spoke a second, flat error vocabulary
+    // ({"error":"bad_json"}) undocumented by the schema.
+    std::string out = run_daemon(
+        "garbage line\n"
+        "{\"cmd\":\"boot\",\"target\":\"cyd\"}\n"
+        "{\"cmd\":\"battery\",\"pct\":50}\n");
+    CHECK(out.find("\"kind\":\"bad_args\"") != std::string::npos);      // garbage line
+    CHECK(out.find("\"kind\":\"unsupported\"") != std::string::npos);   // cyd has no battery
+}
+
+TEST_CASE("run session: an oversized line yields one error reply, not a desync") {
+    // Regression: a line beyond the read buffer was consumed as two commands,
+    // producing two bad_json replies and desyncing request/reply pairing.
+    std::string big = "{\"cmd\":\"snapshot\",\"data\":{\"pad\":\"";
+    big.append(20000, 'x');
+    big += "\"}}\n";
+    std::string out = run_daemon(
+        "{\"cmd\":\"boot\",\"target\":\"cyd\"}\n" + big + "{\"cmd\":\"logs\"}\n");
+    CHECK(reply_count(out) == 3);                                  // boot, error, logs
+    CHECK(out.find("line too long") != std::string::npos);
+}
+
+TEST_CASE("run session: a second boot is rejected, not silently corrupting") {
+    // Regression: re-booting re-ran the firmware's setup() (for LVGL targets
+    // duplicating the whole widget tree; lv_init cannot run twice per process).
+    std::string out = run_daemon(
+        "{\"cmd\":\"boot\",\"target\":\"cyd\"}\n"
+        "{\"cmd\":\"boot\",\"target\":\"cyd\"}\n");
+    CHECK(out.find("\"kind\":\"already_booted\"") != std::string::npos);
+}
+
 TEST_CASE("run session: an invalid serial-expect regex is an error reply, not a crash") {
     // Regression: a malformed pattern threw std::regex_error out of the session
     // loop, killing the whole persistent session (and process).

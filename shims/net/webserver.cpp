@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cctype>
+#include <vector>
 
 WiFiClass     WiFi;
 MDNSResponder MDNS;
@@ -20,8 +21,29 @@ MDNSResponder MDNS;
 static int g_bind_status = -1;
 int sim_http_bind_status() { return g_bind_status; }
 
+// Live server instances, so every sim_boot can stop leftover listeners and
+// reset the bind status: firmware server objects are process-global statics,
+// but on a device each boot starts with no socket bound.
+static std::vector<WebServer*>& live_servers() {
+    static std::vector<WebServer*> v;
+    return v;
+}
+static void webserver_boot_reset() {
+    for (WebServer* s : live_servers()) s->stop();
+    g_bind_status = -1;
+}
+extern void sim_on_boot(void (*)());   // core/runtime
+namespace { struct BootReg { BootReg() { sim_on_boot(webserver_boot_reset); } } g_ws_boot_reg; }
+
+WebServer::WebServer(int port) : port_(port) {
+    live_servers().push_back(this);
+}
+
 WebServer::~WebServer() {
     if (listen_fd_ >= 0) close(listen_fd_);
+    auto& v = live_servers();
+    for (size_t i = 0; i < v.size(); ++i)
+        if (v[i] == this) { v.erase(v.begin() + i); break; }
 }
 
 void WebServer::on(const char* path, int method, Handler h) {
@@ -40,6 +62,7 @@ void WebServer::on(const char* path, int method, Handler finishFn, Handler uploa
 
 void WebServer::begin() {
     signal(SIGPIPE, SIG_IGN);   // a client that closed before we reply must not kill us
+    stop();                     // re-begin never leaks a previous listener
     const char* env = getenv("ESPRITE_HTTP_PORT");
     bound_port_ = env ? atoi(env) : port_;
 
