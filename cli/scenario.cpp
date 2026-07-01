@@ -3,6 +3,7 @@
 #include "target.h"
 #include "screenshot.h"
 #include "sim_input.h"
+#include "WebServer.h"
 #include <ArduinoJson.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -13,29 +14,66 @@
 #include <fstream>
 #include <sstream>
 
+// Upper bound on a POSTed request, kept under the WebServer shim's single-recv
+// buffer (16 KB) so a bounded body is received whole. Snapshots are tiny.
+static const size_t MAX_REQUEST = 15000;
+
 static int http_port() {
+    // Prefer the port the target actually bound (authoritative, and the only way
+    // to reach an ephemeral bind); fall back to the requested env value.
+    int bound = sim_http_bind_status();
+    if (bound > 0) return bound;
     const char* p = getenv("CLAWDSIM_HTTP_PORT");
     return p ? atoi(p) : 8080;
 }
 
-void sim_wifi_post(const std::string& path, const std::string& body) {
+bool sim_wifi_post(const std::string& path, const std::string& body) {
+    // If the target's own HTTP server failed to bind (its port was already in
+    // use), a connect here could reach that unrelated listener and complete the
+    // send, making an undelivered post look successful. Refuse in that case so
+    // the caller reports failure rather than a false positive.
+    if (sim_http_bind_status() == 0) {
+        fprintf(stderr, "sim_wifi_post: target HTTP server not bound (port in use); dropped\n");
+        return false;
+    }
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in a{};
     a.sin_family = AF_INET;
     a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     a.sin_port = htons((uint16_t)http_port());
+    // Enlarge the send buffer so a bounded request always fits without blocking
+    // (the server is single-threaded and only drains after this returns).
+    int sndbuf = 65536;
+    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
+    bool ok = false;
     if (connect(fd, (sockaddr*)&a, sizeof(a)) == 0) {
-        // Build in a std::string so an arbitrarily large body can never overrun a
-        // fixed request buffer. The X-Clawdmeter header satisfies the Clawdmeter
-        // firmware's CSRF guard on /snapshot; other targets ignore it.
+        // The X-Clawdmeter header satisfies the Clawdmeter firmware's CSRF guard
+        // on /snapshot; other targets ignore it.
         std::string req = "POST " + path + " HTTP/1.1\r\nHost: x\r\n"
             "X-Clawdmeter: 1\r\nContent-Length: "
             + std::to_string(body.size()) + "\r\n\r\n" + body;
-        ::send(fd, req.data(), req.size(), 0);
-        shutdown(fd, SHUT_WR);
+        // The single-threaded loopback server reads one bounded chunk, so a body
+        // beyond that would be received truncated. Reject oversized posts cleanly
+        // rather than delivering a partial request that looks valid.
+        if (req.size() > MAX_REQUEST) {
+            fprintf(stderr, "sim_wifi_post: body too large (%zu > %zu bytes); dropped\n",
+                    req.size(), MAX_REQUEST);
+        } else {
+            // Bounded request fits the send buffer, so the blocking loop completes
+            // without ever blocking or short-writing.
+            size_t off = 0;
+            while (off < req.size()) {
+                ssize_t n = ::send(fd, req.data() + off, req.size() - off, 0);
+                if (n <= 0) break;
+                off += (size_t)n;
+            }
+            shutdown(fd, SHUT_WR);
+            ok = (off == req.size());   // full request delivered
+        }
     }
     close(fd);
     sim_run_steps(5);   // let handleClient() + ui_update run
+    return ok;
 }
 
 int scenario_run(const std::string& path, const std::string& default_target) {
@@ -50,12 +88,16 @@ int scenario_run(const std::string& path, const std::string& default_target) {
     if (!sim_boot(target)) { fprintf(stderr, "scenario: unknown target '%s'\n", target.c_str()); return 2; }
     sim_run_steps(60);
 
+    int failures = 0;
     for (JsonObject step : doc["steps"].as<JsonArray>()) {
         const char* cmd = step["cmd"];
         if (!cmd) continue;
         if (!strcmp(cmd, "snapshot")) {
             std::string body; serializeJson(step["data"], body);
-            sim_wifi_post(step["path"] | "/snapshot", body);
+            if (!sim_wifi_post(step["path"] | "/snapshot", body)) {
+                fprintf(stderr, "scenario: snapshot step not delivered (dropped)\n");
+                ++failures;
+            }
         } else if (!strcmp(cmd, "screenshot")) {
             sim_screenshot_png(step["out"] | "esp32sim.png");
         } else if (!strcmp(cmd, "steps")) {
@@ -84,5 +126,5 @@ int scenario_run(const std::string& path, const std::string& default_target) {
             sim_run_steps(5);
         }
     }
-    return 0;
+    return failures ? 3 : 0;   // non-zero if any snapshot step was dropped
 }

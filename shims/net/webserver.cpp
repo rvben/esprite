@@ -48,6 +48,15 @@ void WebServer::begin() {
     }
     listen(listen_fd_, 8);
     fcntl(listen_fd_, F_SETFL, O_NONBLOCK);
+    // If port 0 was requested, the OS assigned an ephemeral port; read it back so
+    // the reported bind status is the real, connectable port (used by tests that
+    // want a collision-free port).
+    if (bound_port_ == 0) {
+        sockaddr_in actual{};
+        socklen_t len = sizeof(actual);
+        if (getsockname(listen_fd_, (sockaddr*)&actual, &len) == 0)
+            bound_port_ = ntohs(actual.sin_port);
+    }
     g_bind_status = bound_port_;
 }
 

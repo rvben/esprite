@@ -115,6 +115,7 @@ static const char* kSchema = R"JSON({
     { "kind": "bind_failed", "description": "serve could not bind the HTTP port (already in use).", "exit_code": 3 },
     { "kind": "ref_not_found", "description": "tap --ref referenced a widget not in the current ui snapshot.", "exit_code": 4 },
     { "kind": "conflict", "description": "An argument or option conflicts with another (e.g. tap given both --ref and x/y).", "exit_code": 5 },
+    { "kind": "post_failed", "description": "snapshot could not be delivered to the running target (connect failed or body exceeds the server read size).", "exit_code": 6 },
     { "kind": "bad_args", "description": "Missing or invalid arguments for the command.", "exit_code": 2 }
   ]
 })JSON";
@@ -333,8 +334,12 @@ int esp32sim_main(int argc, char** argv) {
                             "(install SDL2 and rebuild)\n");
 #endif
 
+        // Report the port the target actually bound (matters when --port 0 asked
+        // the OS for an ephemeral port), not the raw requested value.
+        int bound = sim_http_bind_status();
+        std::string bound_port = bound > 0 ? std::to_string(bound) : (port ? port : "8080");
         fprintf(stderr, "esp32sim: serving '%s' at http://127.0.0.1:%s/snapshot%s\n",
-                t.c_str(), port ? port : "8080",
+                t.c_str(), bound_port.c_str(),
                 shot ? "" : " (pass --shot to capture frames)");
         if (shot) sim_screenshot_png(shot);
 
@@ -392,7 +397,8 @@ int esp32sim_main(int argc, char** argv) {
     }
     if (cmd == "snapshot") {
         std::string json = positional(argc, argv, 0);
-        sim_wifi_post(opt_val(argc, argv, "--path") ? opt_val(argc, argv, "--path") : "/snapshot", json);
+        bool ok = sim_wifi_post(opt_val(argc, argv, "--path") ? opt_val(argc, argv, "--path") : "/snapshot", json);
+        if (!ok) return fail("post_failed", "snapshot not delivered (target server unbound/unreachable or body too large)", 6);
         maybe_shot(argc, argv);
         emit("{\"ok\":true}", "posted snapshot");
         return 0;
@@ -542,8 +548,9 @@ static int cmd_daemon() {
             sim_gpio_set(doc["pin"] | 0, doc["level"] | 0); sim_run_steps(5); printf("{\"ok\":true}\n");
         } else if (cmd == "snapshot") {
             std::string body; serializeJson(doc["data"], body);
-            sim_wifi_post(doc["path"] | "/snapshot", body);
-            printf("{\"ok\":true}\n");
+            bool ok = sim_wifi_post(doc["path"] | "/snapshot", body);
+            if (ok) printf("{\"ok\":true}\n");
+            else printf("{\"ok\":false,\"error\":\"post_failed\"}\n");
         } else if (cmd == "steps") {
             sim_run_steps(doc["n"] | 10); printf("{\"ok\":true}\n");
         } else if (cmd == "serial") {
