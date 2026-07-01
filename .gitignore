@@ -5,3 +5,8 @@ build/
 _deps/
 CMakeCache.txt
 CMakeFiles/
+
+# Local agent memory - never committed
+CLAUDE.md
+CLAUDE.local.md
+.claude/
