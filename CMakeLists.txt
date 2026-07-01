@@ -214,6 +214,18 @@ endif()
 target_link_libraries(sim_itests PRIVATE cli_lib)
 link_sim_targets(sim_itests)
 
+# The Waveshare AMOLED 1.8 runs the same LVGL firmware as the 2.16 C6, and
+# lv_init runs once per process, so it needs its own executable to keep LVGL
+# global state clean. This also regression-tests runtime board selection.
+if(TARGET clawdmeter_fw)
+    add_executable(sim_itests_amoled18 tests/itest_main.cpp tests/itest_amoled18.cpp)
+    target_link_libraries(sim_itests_amoled18 PRIVATE cli_lib)
+    link_sim_targets(sim_itests_amoled18)
+endif()
+
 enable_testing()
 add_test(NAME sim_tests COMMAND sim_tests)
 add_test(NAME sim_itests COMMAND sim_itests)
+if(TARGET sim_itests_amoled18)
+    add_test(NAME sim_itests_amoled18 COMMAND sim_itests_amoled18)
+endif()
