@@ -10,6 +10,8 @@
 #include <cstring>
 #include <cstdlib>
 #include <string>
+#include <thread>
+#include <chrono>
 
 static const int WARMUP_STEPS = 60;
 
@@ -30,6 +32,7 @@ static const char* kSchema = R"JSON({
     "serial":      { "args": ["send TEXT | expect REGEX"] },
     "logs":        {},
     "scenario":    { "args": ["file.json"] },
+    "serve":       { "opts": ["--port P", "--shot OUT", "--interval-ms N"], "desc": "boot and keep pumping so a live bridge can POST to the device" },
     "run":         { "desc": "daemon: newline-delimited JSON commands on stdin" }
   }
 })JSON";
@@ -46,7 +49,8 @@ static bool opt_flag(int argc, char** argv, const char* name) {
 
 // Positional args after the command, skipping options and their values.
 static std::string positional(int argc, char** argv, int index) {
-    static const char* val_opts[] = {"--target", "--steps", "--path", "--shot"};
+    static const char* val_opts[] = {"--target", "--steps", "--path", "--shot",
+                                     "--port", "--interval-ms"};
     int seen = 0;
     for (int i = 2; i < argc; ++i) {
         bool is_opt = argv[i][0] == '-' && argv[i][1] == '-';
@@ -107,6 +111,39 @@ int esp32sim_main(int argc, char** argv) {
         if (file.empty()) { fprintf(stderr, "scenario: need a file\n"); return 2; }
         std::string def = resolve_target(argc, argv);
         return scenario_run(file, def.empty() ? "clawdmeter" : def);
+    }
+
+    if (cmd == "serve") {
+        // Persistent: bind the device webserver on --port, boot, then pump loop()
+        // in real time so a live bridge (clawdmeter serve) can POST snapshots.
+        // Refresh a screenshot every --interval-ms if --shot is given.
+        if (const char* p = opt_val(argc, argv, "--port")) setenv("CLAWDSIM_HTTP_PORT", p, 1);
+        std::string t = resolve_target(argc, argv);
+        if (t.empty()) { fprintf(stderr, "serve: need --target\n"); return 2; }
+        if (!sim_boot(t)) { fprintf(stderr, "serve: unknown target '%s'\n", t.c_str()); return 2; }
+        sim_run_steps(WARMUP_STEPS);
+
+        const char* shot = opt_val(argc, argv, "--shot");
+        const char* port = getenv("CLAWDSIM_HTTP_PORT");
+        int interval = 1000;
+        if (const char* iv = opt_val(argc, argv, "--interval-ms")) interval = atoi(iv);
+        fprintf(stderr, "esp32sim: serving '%s' at http://127.0.0.1:%s/snapshot%s\n",
+                t.c_str(), port ? port : "8080",
+                shot ? "" : " (pass --shot to capture frames)");
+        if (shot) sim_screenshot_png(shot);
+
+        auto last = std::chrono::steady_clock::now();
+        for (;;) {
+            sim_run_steps(4);              // pump handleClient() so POSTs land
+            if (shot) {
+                auto now = std::chrono::steady_clock::now();
+                if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last).count() >= interval) {
+                    sim_screenshot_png(shot);
+                    last = now;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
     }
 
     // Remaining commands boot a target first.
