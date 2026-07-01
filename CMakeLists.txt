@@ -55,6 +55,15 @@ target_link_libraries(core PUBLIC shims)
 # version the Clawdmeter fonts were patched for (lv_font_t has static_bitmap).
 set(LV_BUILD_CONF_PATH ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/lvgl/lv_conf.h
     CACHE STRING "" FORCE)
+# The sim uses only core LVGL: no demos, examples, or ThorVG vector graphics
+# (lv_conf.h enables none of them). LVGL's desktop build defaults these ON and
+# links each back to lvgl with a cyclic static dependency, so every one appears
+# twice on the final link line ("ignoring duplicate libraries"). Disabling them
+# removes that noise and drops ~2.9 MB of needless object code from the build.
+# Set before MakeAvailable so LVGL's option() calls adopt these values.
+set(CONFIG_LV_BUILD_DEMOS         OFF CACHE BOOL "" FORCE)
+set(CONFIG_LV_BUILD_EXAMPLES      OFF CACHE BOOL "" FORCE)
+set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(lvgl
     GIT_REPOSITORY https://github.com/lvgl/lvgl.git
     GIT_TAG v9.5.0
