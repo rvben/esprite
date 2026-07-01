@@ -36,11 +36,13 @@ add_library(peripherals STATIC
     peripherals/display/screenshot.cpp
     peripherals/input/sim_input.cpp
     peripherals/gfx/arduino_gfx.cpp
+    peripherals/tft_espi/tft_espi.cpp
 )
 target_include_directories(peripherals PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/display
     ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/input
-    ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/gfx)
+    ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/gfx
+    ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/tft_espi)
 target_link_libraries(peripherals PUBLIC third_party)
 
 # Core runtime + target registry.
@@ -161,7 +163,7 @@ endforeach()
 
 # Onboarded targets: board variants (which run a shared firmware) and standalone
 # apps. Each provides its own CMakeLists via add_subdirectory.
-foreach(_t waveshare_amoled_216_c6 waveshare_amoled_18 sample_gfx cyd)
+foreach(_t waveshare_amoled_216_c6 waveshare_amoled_18 sample_gfx cyd cyd_tft)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/targets/${_t}/CMakeLists.txt)
         add_subdirectory(targets/${_t})
     endif()

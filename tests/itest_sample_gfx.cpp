@@ -33,3 +33,19 @@ TEST_CASE("cyd paints where you touch (GFX touch bus)") {
     sim_input().touch_pressed = false;
     CHECK(sim_framebuffer().pixel(160, 130) == 0x07FF);   // painted CYAN
 }
+
+TEST_CASE("cyd_tft runs a real TFT_eSPI sketch and toggles a touch button") {
+    sim_serial_clear();
+    REQUIRE(sim_boot("cyd_tft"));
+    sim_run_steps(20);
+    CHECK(sim_serial_contains("cyd_tft: ready"));
+    // LED button fill starts dark grey, not the on-colour TFT_BLUE (0x001F).
+    CHECK(sim_framebuffer().pixel(30, 120) != 0x001F);
+    // Tap the LED button; the edge-detected toggle fills it blue.
+    sim_input().touch_pressed = true;
+    sim_input().touch_x = 85;
+    sim_input().touch_y = 100;
+    sim_run_steps(4);
+    sim_input().touch_pressed = false;
+    CHECK(sim_framebuffer().pixel(30, 120) == 0x001F);   // TFT_BLUE
+}

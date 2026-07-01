@@ -9,10 +9,13 @@ It is a reusable tool, not tied to any one app. A **firmware** is compiled once
 and is board-agnostic (it renders itself from `board_caps()` at runtime); a
 **board** target selects the panel it runs on. The first onboarded firmware is
 Clawdmeter, shown here on two Waveshare boards - `waveshare_amoled_216_c6`
-(480x480) and `waveshare_amoled_18` (368x448) - from one compilation. Two more
-targets show the breadth: `sample_gfx`, a minimal generic Arduino_GFX sketch, and
-`cyd`, a Cheap Yellow Display (ESP32-2432S028R, 320x240) touch-paint demo driven
-by injected taps - both with zero app-specific sim code.
+(480x480) and `waveshare_amoled_18` (368x448) - from one compilation. Three more
+targets show the breadth, all with zero app-specific sim code: `sample_gfx` (a
+generic Arduino_GFX sketch), and two takes on the Cheap Yellow Display
+(ESP32-2432S028R, 320x240) - `cyd`, an Arduino_GFX touch-paint demo, and
+`cyd_tft`, a touch-button UI written against the real **TFT_eSPI** library that
+runs unmodified. Supported display libraries: LVGL, Arduino_GFX, and TFT_eSPI,
+plus a touch bus (`sim_touch`) for non-LVGL sketches.
 
 ## Quick start
 
