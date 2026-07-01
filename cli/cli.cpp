@@ -117,6 +117,7 @@ static const char* kSchema = R"JSON({
     { "kind": "ref_not_found", "description": "tap --ref referenced a widget not in the current ui snapshot.", "exit_code": 4 },
     { "kind": "conflict", "description": "An argument or option conflicts with another (e.g. tap given both --ref and x/y).", "exit_code": 5 },
     { "kind": "post_failed", "description": "snapshot could not be delivered to the running target (connect failed or body exceeds the server read size).", "exit_code": 6 },
+    { "kind": "unsupported", "description": "The command targets a capability the active board lacks (e.g. battery/rotate on a board without it, or a button the board does not have).", "exit_code": 7 },
     { "kind": "bad_args", "description": "Missing or invalid arguments for the command.", "exit_code": 2 }
   ]
 })JSON";
@@ -173,6 +174,21 @@ static int boot_or_die(int argc, char** argv) {
 
 static void maybe_shot(int argc, char** argv) {
     if (const char* out = opt_val(argc, argv, "--shot")) sim_screenshot_png(out);
+}
+
+// The active board's hardware description (set once a target is booted).
+static const BoardDesc* active_board() {
+    const SimTarget* t = sim_active_target();
+    return t ? t->board : nullptr;
+}
+// Whether the active board has a physical control with the given action, so
+// capability-bound commands (button/battery/rotate) can reject faithfully.
+static bool board_has_action(SimInputAction act) {
+    const BoardDesc* b = active_board();
+    if (!b) return false;
+    for (int i = 0; i < b->button_count; ++i)
+        if (b->buttons[i].action == act) return true;
+    return false;
 }
 
 static int cmd_daemon();
@@ -430,6 +446,13 @@ int esprite_main(int argc, char** argv) {
     }
     if (cmd == "button") {
         std::string which = positional(argc, argv, 0);
+        if (which != "primary" && which != "secondary" && which != "pwr")
+            return fail("bad_args", "button takes primary|secondary|pwr", 2);
+        SimInputAction act = (which == "pwr")       ? ACT_PWR
+                           : (which == "secondary") ? ACT_SECONDARY
+                                                    : ACT_PRIMARY;
+        if (!board_has_action(act))
+            return fail("unsupported", "this board has no '" + which + "' button", 7);
         if (which == "pwr") { sim_input().pwr_events.push_back(1); sim_run_steps(5); }
         else {
             int idx = (which == "secondary") ? 1 : 0;
@@ -441,6 +464,8 @@ int esprite_main(int argc, char** argv) {
         return 0;
     }
     if (cmd == "battery") {
+        if (!active_board() || !active_board()->has_battery)
+            return fail("unsupported", "this board has no battery", 7);
         sim_input().battery_pct = atoi(positional(argc, argv, 0).c_str());
         if (opt_flag(argc, argv, "--charging")) sim_input().charging = true;
         if (opt_flag(argc, argv, "--no-vbus"))  sim_input().vbus = false;
@@ -452,6 +477,8 @@ int esprite_main(int argc, char** argv) {
         return 0;
     }
     if (cmd == "rotate") {
+        if (!active_board() || !active_board()->has_rotation)
+            return fail("unsupported", "this board does not support rotation", 7);
         sim_input().quadrant = atoi(positional(argc, argv, 0).c_str());
         sim_run_steps(5);
         maybe_shot(argc, argv);
@@ -531,21 +558,36 @@ static int cmd_daemon() {
             printf("{\"ok\":true,\"x\":%d,\"y\":%d}\n", x, y);
         } else if (cmd == "button") {
             std::string which = doc["which"] | "primary";
-            if (which == "pwr") { sim_input().pwr_events.push_back(1); sim_run_steps(5); }
-            else {
-                int idx = (which == "secondary") ? 1 : 0;
-                sim_input().button[idx] = true;  sim_run_steps(5);
-                sim_input().button[idx] = false; sim_run_steps(3);
+            SimInputAction act = (which == "pwr")       ? ACT_PWR
+                               : (which == "secondary") ? ACT_SECONDARY
+                                                        : ACT_PRIMARY;
+            if (!board_has_action(act)) {
+                printf("{\"ok\":false,\"error\":\"unsupported\"}\n");
+            } else {
+                if (which == "pwr") { sim_input().pwr_events.push_back(1); sim_run_steps(5); }
+                else {
+                    int idx = (which == "secondary") ? 1 : 0;
+                    sim_input().button[idx] = true;  sim_run_steps(5);
+                    sim_input().button[idx] = false; sim_run_steps(3);
+                }
+                printf("{\"ok\":true}\n");
             }
-            printf("{\"ok\":true}\n");
         } else if (cmd == "battery") {
-            sim_input().battery_pct = doc["pct"] | 75;
-            if (doc["charging"].is<bool>()) sim_input().charging = doc["charging"];
-            if (doc["vbus"].is<bool>())     sim_input().vbus = doc["vbus"];
-            sim_run_steps(5);
-            printf("{\"ok\":true}\n");
+            if (!active_board() || !active_board()->has_battery) {
+                printf("{\"ok\":false,\"error\":\"unsupported\"}\n");
+            } else {
+                sim_input().battery_pct = doc["pct"] | 75;
+                if (doc["charging"].is<bool>()) sim_input().charging = doc["charging"];
+                if (doc["vbus"].is<bool>())     sim_input().vbus = doc["vbus"];
+                sim_run_steps(5);
+                printf("{\"ok\":true}\n");
+            }
         } else if (cmd == "rotate") {
-            sim_input().quadrant = doc["q"] | 0; sim_run_steps(5); printf("{\"ok\":true}\n");
+            if (!active_board() || !active_board()->has_rotation) {
+                printf("{\"ok\":false,\"error\":\"unsupported\"}\n");
+            } else {
+                sim_input().quadrant = doc["q"] | 0; sim_run_steps(5); printf("{\"ok\":true}\n");
+            }
         } else if (cmd == "gpio") {
             sim_gpio_set(doc["pin"] | 0, doc["level"] | 0); sim_run_steps(5); printf("{\"ok\":true}\n");
         } else if (cmd == "snapshot") {

@@ -27,6 +27,14 @@ TEST_CASE("no arguments is a usage error") {
     CHECK(run_cli({"esprite"}) == 1);
 }
 
+TEST_CASE("commands reject capabilities the active board lacks") {
+    // sample_gfx has no battery, no rotation, and no buttons, so these must fail
+    // with the 'unsupported' exit code (7) rather than silently succeeding.
+    CHECK(run_cli({"esprite", "battery", "50", "--target", "sample_gfx"}) == 7);
+    CHECK(run_cli({"esprite", "rotate", "1", "--target", "sample_gfx"}) == 7);
+    CHECK(run_cli({"esprite", "button", "primary", "--target", "sample_gfx"}) == 7);
+}
+
 TEST_CASE("--json is a global flag, never consumed as a positional") {
     // Regression: `screenshot --json` used to treat --json as the output-path
     // positional, writing a file literally named "--json" instead of the default.
