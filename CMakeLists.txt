@@ -93,8 +93,14 @@ endfunction()
 function(link_sim_targets exe)
     get_property(_libs GLOBAL PROPERTY SIM_TARGET_LIBS)
     foreach(_lib ${_libs})
-        target_link_libraries(${exe} PRIVATE ${_lib})
-        target_link_options(${exe} PRIVATE "-Wl,-force_load,$<TARGET_FILE:${_lib}>")
+        if(APPLE)
+            target_link_libraries(${exe} PRIVATE ${_lib})
+            target_link_options(${exe} PRIVATE "-Wl,-force_load,$<TARGET_FILE:${_lib}>")
+        else()
+            # GNU ld / lld whole-archive keeps the target's self-registration.
+            target_link_libraries(${exe} PRIVATE
+                "-Wl,--whole-archive" ${_lib} "-Wl,--no-whole-archive")
+        endif()
     endforeach()
 endfunction()
 

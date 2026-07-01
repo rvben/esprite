@@ -25,11 +25,11 @@ void sim_wifi_post(const std::string& path, const std::string& body) {
     a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     a.sin_port = htons((uint16_t)http_port());
     if (connect(fd, (sockaddr*)&a, sizeof(a)) == 0) {
-        char req[8192];
-        int n = snprintf(req, sizeof(req),
-            "POST %s HTTP/1.1\r\nHost: x\r\nContent-Length: %zu\r\n\r\n%s",
-            path.c_str(), body.size(), body.c_str());
-        ::send(fd, req, (size_t)n, 0);
+        // Build in a std::string so an arbitrarily large body can never overrun a
+        // fixed request buffer.
+        std::string req = "POST " + path + " HTTP/1.1\r\nHost: x\r\nContent-Length: "
+            + std::to_string(body.size()) + "\r\n\r\n" + body;
+        ::send(fd, req.data(), req.size(), 0);
         shutdown(fd, SHUT_WR);
     }
     close(fd);
