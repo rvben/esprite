@@ -31,5 +31,9 @@ void sim_step() { if (g_active && g_active->loop) g_active->loop(); }
 void sim_run_steps(int n) {
     for (int i = 0; i < n && g_active && g_active->loop; ++i) g_active->loop();
 }
+void sim_settle_ms(unsigned ms, int max_steps) {
+    unsigned start = millis();
+    for (int i = 0; i < max_steps && millis() - start < ms; ++i) sim_step();
+}
 
 const SimTarget* sim_active_target() { return g_active; }

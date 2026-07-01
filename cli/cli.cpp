@@ -416,6 +416,7 @@ int esprite_main(int argc, char** argv) {
         std::string json = positional(argc, argv, 0);
         bool ok = sim_wifi_post(opt_val(argc, argv, "--path") ? opt_val(argc, argv, "--path") : "/snapshot", json);
         if (!ok) return fail("post_failed", "snapshot not delivered (target server unbound/unreachable or body too large)", 6);
+        sim_settle_ms();   // let the firmware render the injected data
         maybe_shot(argc, argv);
         emit("{\"ok\":true}", "posted snapshot");
         return 0;
@@ -543,6 +544,7 @@ int esprite_daemon(FILE* in, FILE* out) {
             fprintf(out, "%s\n", lvgl_snapshot_json().c_str());
         } else if (cmd == "screenshot") {
             const char* path = doc["out"] | "esprite.png";
+            sim_settle_ms();   // capture a settled frame, whatever ran before
             bool ok = sim_screenshot_png(path);
             fprintf(out, "{\"ok\":%s,\"path\":\"%s\",\"w\":%d,\"h\":%d}\n",
                     jbool(ok), json_esc(path).c_str(), sim_framebuffer().w(), sim_framebuffer().h());
@@ -595,7 +597,7 @@ int esprite_daemon(FILE* in, FILE* out) {
         } else if (cmd == "snapshot") {
             std::string body; serializeJson(doc["data"], body);
             bool ok = sim_wifi_post(doc["path"] | "/snapshot", body);
-            if (ok) fprintf(out, "{\"ok\":true}\n");
+            if (ok) { sim_settle_ms(); fprintf(out, "{\"ok\":true}\n"); }
             else fprintf(out, "{\"ok\":false,\"error\":\"post_failed\"}\n");
         } else if (cmd == "steps") {
             sim_run_steps(doc["n"] | 10); fprintf(out, "{\"ok\":true}\n");

@@ -97,8 +97,11 @@ int scenario_run(const std::string& path, const std::string& default_target) {
             if (!sim_wifi_post(step["path"] | "/snapshot", body)) {
                 fprintf(stderr, "scenario: snapshot step not delivered (dropped)\n");
                 ++failures;
+            } else {
+                sim_settle_ms();   // let the firmware render the injected data
             }
         } else if (!strcmp(cmd, "screenshot")) {
+            sim_settle_ms();       // capture a settled frame, whatever ran before
             sim_screenshot_png(step["out"] | "esprite.png");
         } else if (!strcmp(cmd, "steps")) {
             sim_run_steps(step["n"] | 10);

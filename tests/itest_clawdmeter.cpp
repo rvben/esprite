@@ -81,9 +81,11 @@ TEST_CASE("waveshare_amoled_216_c6 boots, renders, serves snapshots, and gates O
     uint32_t before = fb_hash();
 
     // Inject a limits snapshot through the genuine HTTP -> apply_lim path.
+    // Settle by time, not step count: the render only lands after LVGL's next
+    // refresh cycle. sim_itests_daemon asserts the bars are actually painted.
     sim_wifi_post("/snapshot",
         "{\"lim\":1,\"s5\":42,\"s5r\":180,\"s7\":10,\"s7r\":6000,\"ctx\":55,\"cost\":1.5,\"model\":\"opus\"}");
-    sim_run_steps(10);
+    sim_settle_ms();
     sim_screenshot_png("/tmp/esprite_itest_limits.png");
 
     // The injected data changed what is rendered.

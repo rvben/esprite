@@ -222,6 +222,12 @@ if(TARGET clawdmeter_fw)
     add_executable(sim_itests_amoled18 tests/itest_main.cpp tests/itest_amoled18.cpp)
     target_link_libraries(sim_itests_amoled18 PRIVATE cli_lib)
     link_sim_targets(sim_itests_amoled18)
+
+    # The run-session daemon driving an LVGL target end to end: same one-boot-
+    # per-process constraint, so it gets its own executable too.
+    add_executable(sim_itests_daemon tests/itest_main.cpp tests/itest_daemon.cpp)
+    target_link_libraries(sim_itests_daemon PRIVATE cli_lib)
+    link_sim_targets(sim_itests_daemon)
 endif()
 
 enable_testing()
@@ -229,4 +235,7 @@ add_test(NAME sim_tests COMMAND sim_tests)
 add_test(NAME sim_itests COMMAND sim_itests)
 if(TARGET sim_itests_amoled18)
     add_test(NAME sim_itests_amoled18 COMMAND sim_itests_amoled18)
+endif()
+if(TARGET sim_itests_daemon)
+    add_test(NAME sim_itests_daemon COMMAND sim_itests_daemon)
 endif()
