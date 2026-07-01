@@ -7,6 +7,19 @@
 #define HTTP_GET  1
 #define HTTP_POST 2
 
+// Multipart upload status (OTA /update). The sim does not stream multipart
+// bodies, so upload() reports an idle END state; the finish handler still runs
+// so the authorized/no-firmware paths behave faithfully.
+enum { UPLOAD_FILE_START = 0, UPLOAD_FILE_WRITE, UPLOAD_FILE_END, UPLOAD_FILE_ABORTED };
+struct HTTPUpload {
+    int      status      = UPLOAD_FILE_END;
+    uint8_t* buf         = nullptr;
+    size_t   currentSize = 0;
+    size_t   totalSize   = 0;
+    String   filename;
+    String   name;
+};
+
 // Real localhost TCP webserver so app HTTP handlers run against genuine POSTs.
 // The bound port is the constructor port unless env CLAWDSIM_HTTP_PORT overrides
 // it (lets tests avoid privileged port 80).
@@ -16,6 +29,10 @@ public:
     explicit WebServer(int port) : port_(port) {}
     ~WebServer();
     void on(const char* path, int method, Handler h);
+    // Upload form (e.g. OTA /update): finishFn runs when the request completes;
+    // uploadFn is kept for fidelity though the sim doesn't stream the body.
+    void on(const char* path, int method, Handler finishFn, Handler uploadFn);
+    HTTPUpload& upload() { return upload_; }
     void begin();
     void handleClient();
     void send(int code, const char* type, const String& body);
@@ -29,13 +46,16 @@ public:
     void stop();
     int boundPort() const { return bound_port_; }
 private:
+    void drive_upload(const Handler& cb);   // parse a multipart file part, run the upload cb
     int port_;
     int bound_port_ = 0;
     int listen_fd_ = -1;
     std::map<std::string, Handler> get_, post_;
+    std::map<std::string, Handler> upload_handlers_;   // per-path upload callbacks (fidelity only)
     std::map<std::string, std::string> headers_;   // current request headers (lowercased keys)
     std::string body_;
     int client_fd_ = -1;
+    HTTPUpload upload_;
 };
 
 // Bind status of the most recent WebServer::begin(): -1 = never started,

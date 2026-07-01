@@ -8,10 +8,14 @@ class WiFiManager {
 public:
     typedef void (*ApCb)(WiFiManager*);
     void setConfigPortalTimeout(int) {}
+    void setConnectTimeout(int) {}
+    void setEnableConfigPortal(bool enable) { portal_enabled_ = enable; }
     void setAPCallback(ApCb cb) { ap_cb_ = cb; }
     bool autoConnect(const char* ap_ssid = nullptr) {
+        // Only open the simulated captive portal when it is enabled (the trial
+        // connect path disables it) and the env opts in; otherwise connect.
         const char* portal = getenv("CLAWDSIM_WIFI_PORTAL");
-        if (portal && portal[0] == '1' && ap_cb_) { ap_cb_(this); return false; }
+        if (portal_enabled_ && portal && portal[0] == '1' && ap_cb_) { ap_cb_(this); return false; }
         (void)ap_ssid;
         return true;
     }
@@ -22,4 +26,5 @@ public:
     }
 private:
     ApCb ap_cb_ = nullptr;
+    bool portal_enabled_ = true;
 };

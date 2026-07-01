@@ -29,6 +29,15 @@ void WebServer::on(const char* path, int method, Handler h) {
     else                     get_[path] = h;
 }
 
+void WebServer::on(const char* path, int method, Handler finishFn, Handler uploadFn) {
+    // Register the finish handler as the request handler so POST /update runs it
+    // (auth + no-firmware paths behave faithfully); the sim does not stream the
+    // multipart body, so the upload handler is stored but not driven.
+    if (method == HTTP_POST) post_[path] = finishFn;
+    else                     get_[path] = finishFn;
+    upload_handlers_[path] = uploadFn;
+}
+
 void WebServer::begin() {
     signal(SIGPIPE, SIG_IGN);   // a client that closed before we reply must not kill us
     const char* env = getenv("CLAWDSIM_HTTP_PORT");
@@ -71,11 +80,34 @@ void WebServer::handleClient() {
     fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
     timeval tv{0, 200000};   // 200 ms
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    // Accumulate the whole request: headers plus the full body per Content-Length
+    // (a multipart /update upload spans several recv chunks). Bounded so a runaway
+    // body can never grow memory without limit; the sim only receives small test
+    // uploads, not real multi-megabyte firmware.
+    static const size_t MAX_REQ = 262144;   // 256 KB
+    std::string req;
     char buf[16384];
-    ssize_t n = recv(fd, buf, sizeof(buf) - 1, 0);
+    ssize_t n = recv(fd, buf, sizeof(buf), 0);
     if (n <= 0) { close(fd); return; }
-    buf[n] = 0;
-    std::string req(buf, (size_t)n);
+    req.append(buf, (size_t)n);
+    size_t content_len = std::string::npos;   // npos until a Content-Length header is seen
+    while (req.size() < MAX_REQ) {
+        size_t he = req.find("\r\n\r\n");
+        if (he != std::string::npos) {
+            if (content_len == std::string::npos) {
+                std::string head = req.substr(0, he);
+                for (char& c : head) c = (char)tolower((unsigned char)c);
+                size_t cp = head.find("content-length:");
+                if (cp != std::string::npos) content_len = (size_t)strtoul(head.c_str() + cp + 15, nullptr, 10);
+            }
+            if (content_len == std::string::npos) break;               // no body length: take what we have
+            if (req.size() - (he + 4) >= content_len) break;           // full body received
+        }
+        ssize_t m = recv(fd, buf, sizeof(buf), 0);
+        if (m <= 0) break;                                             // peer closed or timed out
+        req.append(buf, (size_t)m);
+    }
 
     std::string method = req.substr(0, req.find(' '));
     size_t p1 = req.find(' ');
@@ -86,7 +118,9 @@ void WebServer::handleClient() {
         path = req.substr(p1, p2 - p1);
     }
     size_t bodyPos = req.find("\r\n\r\n");
-    body_ = (bodyPos == std::string::npos) ? "" : req.substr(bodyPos + 4);
+    if (bodyPos == std::string::npos)      body_ = "";
+    else if (content_len != std::string::npos) body_ = req.substr(bodyPos + 4, content_len);
+    else                                   body_ = req.substr(bodyPos + 4);
 
     // Parse request headers (lowercased keys) so hasHeader/header work.
     headers_.clear();
@@ -110,10 +144,96 @@ void WebServer::handleClient() {
     client_fd_ = fd;
     auto& table = (method == "POST") ? post_ : get_;
     auto it = table.find(path);
-    if (it != table.end()) it->second();
+    if (it != table.end()) {
+        // Drive a multipart file upload (e.g. OTA /update) before the finish
+        // handler, so firmware whose real work happens in the upload callback
+        // (Update.begin/write/end) can reach its success path in the sim. This
+        // ordering mirrors real Arduino WebServer, which streams the body into
+        // the upload handler before invoking the main handler; there is no
+        // route-level auth gate on hardware, so an upload handler must
+        // authorize itself (Clawdmeter's checks X-Clawdmeter at
+        // UPLOAD_FILE_START and rejects before touching Update). Keeping the
+        // shim faithful here means a firmware that forgets that guard fails in
+        // the sim exactly as it would on the device.
+        if (method == "POST") {
+            auto uh = upload_handlers_.find(path);
+            if (uh != upload_handlers_.end()) drive_upload(uh->second);
+        }
+        it->second();
+    }
     else send(404, "text/plain", String("not found\n"));
     close(client_fd_);
     client_fd_ = -1;
+}
+
+// Parse a multipart/form-data body and drive the upload callback through the
+// START/WRITE/END lifecycle for the first part that carries a filename. If the
+// body is not multipart or has no file part, the callback is not driven and the
+// finish handler sees no upload (faithful "no firmware" path).
+static bool extract_file_part(const std::string& body, const std::string& ctype,
+                              std::string& out_data, std::string& out_filename) {
+    size_t bp = ctype.find("boundary=");
+    if (bp == std::string::npos) return false;
+    std::string boundary = ctype.substr(bp + 9);
+    if (!boundary.empty() && boundary.front() == '"') {
+        boundary.erase(0, 1);
+        size_t q = boundary.find('"');
+        if (q != std::string::npos) boundary.erase(q);
+    } else {
+        size_t sc = boundary.find_first_of("; \r\n");
+        if (sc != std::string::npos) boundary.erase(sc);
+    }
+    if (boundary.empty()) return false;
+    std::string delim = "--" + boundary;
+    size_t pos = body.find(delim);
+    while (pos != std::string::npos) {
+        size_t part_start = pos + delim.size();
+        size_t next = body.find(delim, part_start);
+        if (next == std::string::npos) break;
+        std::string part = body.substr(part_start, next - part_start);
+        size_t hend = part.find("\r\n\r\n");
+        if (hend != std::string::npos) {
+            std::string phdr = part.substr(0, hend);
+            if (phdr.find("filename=") != std::string::npos) {
+                std::string content = part.substr(hend + 4);
+                if (content.size() >= 2 && content.compare(content.size() - 2, 2, "\r\n") == 0)
+                    content.erase(content.size() - 2);   // strip the CRLF before the delimiter
+                out_data = content;
+                size_t fn = phdr.find("filename=\"");
+                if (fn != std::string::npos) {
+                    fn += 10;
+                    size_t fe = phdr.find('"', fn);
+                    out_filename = phdr.substr(fn, fe == std::string::npos ? std::string::npos : fe - fn);
+                }
+                return true;
+            }
+        }
+        pos = next;
+    }
+    return false;
+}
+
+void WebServer::drive_upload(const Handler& cb) {
+    auto ct = headers_.find("content-type");
+    if (ct == headers_.end() || ct->second.find("multipart/form-data") == std::string::npos) return;
+    std::string data, fname;
+    if (!extract_file_part(body_, ct->second, data, fname)) return;
+
+    upload_ = HTTPUpload{};
+    upload_.filename = String(fname.c_str());
+    upload_.name     = String("firmware");
+
+    upload_.status = UPLOAD_FILE_START;
+    cb();
+    upload_.status      = UPLOAD_FILE_WRITE;
+    upload_.buf         = (uint8_t*)data.data();
+    upload_.currentSize = data.size();
+    cb();
+    upload_.status      = UPLOAD_FILE_END;
+    upload_.buf         = nullptr;
+    upload_.totalSize   = data.size();
+    upload_.currentSize = 0;
+    cb();
 }
 
 void WebServer::send(int code, const char* type, const String& body) {

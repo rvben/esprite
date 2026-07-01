@@ -15,6 +15,7 @@ add_sim_target(clawdmeter
     ${CM}/app_wifi.cpp
     ${CM}/wifi_link.cpp
     ${CM}/webconfig.cpp
+    ${CM}/ota.cpp
     ${CM}/ui.cpp
     ${CM}/splash.cpp
     ${CM}/idle.cpp
