@@ -66,6 +66,11 @@ TEST_CASE("--version prints the tool name and version") {
     CHECK(run_cli_out({"esprite", "--version"}, &out) == 0);
     CHECK(out.find("\"name\":\"esprite\"") != std::string::npos);
     CHECK(out.find("\"version\"") != std::string::npos);
+
+    // It is documented as a global flag, so it wins in any position.
+    CHECK(run_cli_out({"esprite", "list-targets", "--version"}, &out) == 0);
+    CHECK(out.find("\"name\":\"esprite\"") != std::string::npos);
+    CHECK(out.find("\"items\"") == std::string::npos);
 }
 
 TEST_CASE("the schema version matches the binary's --version") {

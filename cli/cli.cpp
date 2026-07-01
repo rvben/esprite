@@ -283,7 +283,7 @@ int esprite_main(int argc, char** argv) {
     std::string cmd = argv[1];
 
     if (cmd == "schema") { printf("%s\n", kSchema.c_str()); return 0; }
-    if (cmd == "--version" || cmd == "version") {
+    if (cmd == "--version" || cmd == "version" || opt_flag(argc, argv, "--version")) {
         emit(std::string("{\"name\":\"esprite\",\"version\":\"") + ESPRITE_VERSION + "\"}",
              std::string("esprite ") + ESPRITE_VERSION);
         return 0;

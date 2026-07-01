@@ -81,4 +81,3 @@ TEST_CASE("run session: injected snapshot data is rendered, not just applied to 
         CHECK(distinct_colors(x, y, w, h) >= 2);
     }
 }
-
