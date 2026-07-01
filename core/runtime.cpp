@@ -22,7 +22,7 @@ bool sim_boot(const std::string& key) {
     sim_gpio_reset();                    // clear injected GPIO levels for a clean boot
     // Default HTTP port for socket-backed webserver shims (targets can override
     // via the same env before boot).
-    if (!getenv("CLAWDSIM_HTTP_PORT")) setenv("CLAWDSIM_HTTP_PORT", "8080", 1);
+    if (!getenv("ESPRITE_HTTP_PORT")) setenv("ESPRITE_HTTP_PORT", "8080", 1);
     if (t->setup) t->setup();
     return true;
 }

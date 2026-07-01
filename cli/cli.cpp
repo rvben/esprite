@@ -26,7 +26,7 @@ static const int WARMUP_STEPS = 60;
 
 static const char* kSchema = R"JSON({
   "clispec": "0.2",
-  "name": "esp32sim",
+  "name": "esprite",
   "version": "0.1.0",
   "description": "Host-native ESP32 simulator. Boots a target's firmware, renders its UI, and drives it: snapshot-ref UI reads, input injection, screenshots, and a persistent JSON session. Results are JSON on stdout; logs go to stderr.",
   "global_args": [
@@ -58,7 +58,7 @@ static const char* kSchema = R"JSON({
         { "name": "value", "description": "Bar/arc value, when present.", "type": "number" }
       ] },
     { "name": "screenshot", "description": "Boot, render, and write a PNG of the device screen.", "mutating": false, "stability": "stable",
-      "args": [ { "name": "out", "description": "Output PNG path (default esp32sim.png).", "type": "string", "required": false } ],
+      "args": [ { "name": "out", "description": "Output PNG path (default esprite.png).", "type": "string", "required": false } ],
       "example": { "args": ["out.png", "--target", "clawdmeter"], "stdin": "" },
       "output_fields": [
         { "name": "ok", "description": "Wrote the file.", "type": "boolean" },
@@ -248,7 +248,7 @@ static int fail(const char* kind, const std::string& msg, int code) {
     return code;
 }
 
-int esp32sim_main(int argc, char** argv) {
+int esprite_main(int argc, char** argv) {
     set_output_mode(argc, argv);
     if (argc < 2 || !strcmp(argv[1], "--help") || !strcmp(argv[1], "help")) {
         printf("%s\n", kSchema);
@@ -303,14 +303,14 @@ int esp32sim_main(int argc, char** argv) {
         // Persistent: bind the device webserver on --port, boot, then pump loop()
         // in real time so a live bridge (clawdmeter serve) can POST snapshots.
         // Refresh a screenshot every --interval-ms if --shot is given.
-        if (const char* p = opt_val(argc, argv, "--port")) setenv("CLAWDSIM_HTTP_PORT", p, 1);
+        if (const char* p = opt_val(argc, argv, "--port")) setenv("ESPRITE_HTTP_PORT", p, 1);
         std::string t = resolve_target(argc, argv);
         if (t.empty()) return fail("no_target", "no --target and more than one target registered", 2);
         if (!sim_boot(t)) return fail("unknown_target", "unknown target '" + t + "'", 2);
         sim_run_steps(WARMUP_STEPS);
 
         const char* shot = opt_val(argc, argv, "--shot");
-        const char* port = getenv("CLAWDSIM_HTTP_PORT");
+        const char* port = getenv("ESPRITE_HTTP_PORT");
         // If the target ran an HTTP server but its bind failed (port in use), a
         // live bridge could never reach it. Fail loudly instead of looping.
         if (sim_http_bind_status() == 0)
@@ -338,7 +338,7 @@ int esp32sim_main(int argc, char** argv) {
         // the OS for an ephemeral port), not the raw requested value.
         int bound = sim_http_bind_status();
         std::string bound_port = bound > 0 ? std::to_string(bound) : (port ? port : "8080");
-        fprintf(stderr, "esp32sim: serving '%s' at http://127.0.0.1:%s/snapshot%s\n",
+        fprintf(stderr, "esprite: serving '%s' at http://127.0.0.1:%s/snapshot%s\n",
                 t.c_str(), bound_port.c_str(),
                 shot ? "" : " (pass --shot to capture frames)");
         if (shot) sim_screenshot_png(shot);
@@ -386,7 +386,7 @@ int esp32sim_main(int argc, char** argv) {
     }
     if (cmd == "screenshot") {
         std::string out = positional(argc, argv, 0);
-        if (out.empty()) out = "esp32sim.png";
+        if (out.empty()) out = "esprite.png";
         if (const char* s = opt_val(argc, argv, "--steps")) sim_run_steps(atoi(s));
         bool ok = sim_screenshot_png(out.c_str());
         int w = sim_framebuffer().w(), h = sim_framebuffer().h();
@@ -487,7 +487,7 @@ int esp32sim_main(int argc, char** argv) {
         return 0;
     }
 
-    return fail("bad_args", "unknown command '" + cmd + "' (try: esp32sim schema)", 2);
+    return fail("bad_args", "unknown command '" + cmd + "' (try: esprite schema)", 2);
 }
 
 // Daemon: a persistent agent session. Read newline-delimited JSON commands on
@@ -511,7 +511,7 @@ static int cmd_daemon() {
         } else if (cmd == "ui") {
             printf("%s\n", lvgl_snapshot_json().c_str());
         } else if (cmd == "screenshot") {
-            const char* out = doc["out"] | "esp32sim.png";
+            const char* out = doc["out"] | "esprite.png";
             bool ok = sim_screenshot_png(out);
             printf("{\"ok\":%s,\"path\":\"%s\",\"w\":%d,\"h\":%d}\n",
                    jbool(ok), json_esc(out).c_str(), sim_framebuffer().w(), sim_framebuffer().h());

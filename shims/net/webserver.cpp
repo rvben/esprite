@@ -40,7 +40,7 @@ void WebServer::on(const char* path, int method, Handler finishFn, Handler uploa
 
 void WebServer::begin() {
     signal(SIGPIPE, SIG_IGN);   // a client that closed before we reply must not kill us
-    const char* env = getenv("CLAWDSIM_HTTP_PORT");
+    const char* env = getenv("ESPRITE_HTTP_PORT");
     bound_port_ = env ? atoi(env) : port_;
 
     listen_fd_ = socket(AF_INET, SOCK_STREAM, 0);

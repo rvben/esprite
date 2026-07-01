@@ -8,10 +8,10 @@ TEST_CASE("screenshot writes a decodable PNG matching the framebuffer") {
     Framebuffer& fb = sim_framebuffer();
     fb.init(480, 480);
     fb.fill(0xF800);                       // red
-    REQUIRE(sim_screenshot_png("/tmp/esp32sim_shot.png"));
+    REQUIRE(sim_screenshot_png("/tmp/esprite_shot.png"));
 
     int w, h, ch;
-    unsigned char* img = stbi_load("/tmp/esp32sim_shot.png", &w, &h, &ch, 3);
+    unsigned char* img = stbi_load("/tmp/esprite_shot.png", &w, &h, &ch, 3);
     REQUIRE(img != nullptr);
     CHECK(w == 480);
     CHECK(h == 480);

@@ -1,4 +1,4 @@
-# esp32-sim
+# esprite
 
 A host-native ESP32 simulator. It boots ESP32 / Arduino firmware **compiled from
 source** on your machine, renders the device display into an offscreen
@@ -17,7 +17,7 @@ apps with zero app-specific code.
 
 ```bash
 make build
-./build/esp32sim list-targets
+./build/esprite list-targets
 make screenshot TARGET=clawdmeter     # writes clawdmeter.png
 make screenshot TARGET=sample_gfx     # writes sample_gfx.png
 make test                             # unit + integration tests
@@ -34,7 +34,7 @@ drives the genuine data path (HTTP POST to the on-device server, parsed by the
 firmware's own handler) and the real UI updates:
 
 ```bash
-./build/esp32sim snapshot \
+./build/esprite snapshot \
   '{"lim":1,"s5":42,"s5r":180,"s7":10,"s7r":6000,"ctx":55,"cost":1.5,"model":"opus"}' \
   --target clawdmeter --shot limits.png
 ```
@@ -44,7 +44,7 @@ firmware's own handler) and the real UI updates:
 For an interactive, iOS-Simulator-style view, run `serve` with `--window`:
 
 ```bash
-esp32sim serve --target clawdmeter --port 8080 --window
+esprite serve --target clawdmeter --port 8080 --window
 ```
 
 This opens a native SDL2 window that presents the device framebuffer live and
@@ -59,7 +59,7 @@ headless, and `--window` prints a hint. `--scale N` enlarges the window N times.
 ## CLI
 
 ```
-esp32sim <command> [--target NAME] [args]
+esprite <command> [--target NAME] [args]
 
 list-targets                     list onboarded targets
 schema                           machine-readable JSON of all commands
@@ -94,16 +94,16 @@ Scenarios are ordered JSON steps, useful in CI:
 
 ## Driving it (agent-facing)
 
-`esp32sim schema` prints the machine-readable clispec contract (commands, args,
+`esprite schema` prints the machine-readable clispec contract (commands, args,
 output fields, error kinds, exit codes). Commands emit JSON on stdout; logs go to
 stderr.
 
 For LVGL targets there is a **snapshot-ref model** like a browser page snapshot:
 
 ```bash
-esp32sim ui --target clawdmeter
+esprite ui --target clawdmeter
 # [{"ref":"e6","type":"bar","x":36,"y":168,"w":408,"h":24,"value":42}, ...]
-esp32sim tap --ref e6 --target clawdmeter     # tap that widget, not a pixel
+esprite tap --ref e6 --target clawdmeter     # tap that widget, not a pixel
 ```
 
 `ui` returns the live widget tree (refs, type, coords, text, bar/arc values), so
@@ -136,7 +136,7 @@ core/          virtual clock + setup()/loop() pump + target registry
 shims/         Arduino, ESP-IDF, and networking APIs (host-backed)
 peripherals/   framebuffer + PNG screenshot, LVGL glue, Arduino_GFX shim,
                injected input bus
-cli/           the esp32sim CLI
+cli/           the esprite CLI
 targets/       one folder per onboarded app
 ```
 

@@ -21,7 +21,7 @@ struct HTTPUpload {
 };
 
 // Real localhost TCP webserver so app HTTP handlers run against genuine POSTs.
-// The bound port is the constructor port unless env CLAWDSIM_HTTP_PORT overrides
+// The bound port is the constructor port unless env ESPRITE_HTTP_PORT overrides
 // it (lets tests avoid privileged port 80).
 class WebServer {
 public:

@@ -23,7 +23,7 @@ static int http_port() {
     // to reach an ephemeral bind); fall back to the requested env value.
     int bound = sim_http_bind_status();
     if (bound > 0) return bound;
-    const char* p = getenv("CLAWDSIM_HTTP_PORT");
+    const char* p = getenv("ESPRITE_HTTP_PORT");
     return p ? atoi(p) : 8080;
 }
 
@@ -99,7 +99,7 @@ int scenario_run(const std::string& path, const std::string& default_target) {
                 ++failures;
             }
         } else if (!strcmp(cmd, "screenshot")) {
-            sim_screenshot_png(step["out"] | "esp32sim.png");
+            sim_screenshot_png(step["out"] | "esprite.png");
         } else if (!strcmp(cmd, "steps")) {
             sim_run_steps(step["n"] | 10);
         } else if (!strcmp(cmd, "battery")) {

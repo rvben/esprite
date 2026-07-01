@@ -159,7 +159,7 @@ SimWindow* sim_window_open(const char* title, const BoardDesc* board, int scale)
     win->has_rotation = board->has_rotation;
     win->strip = (win->has_battery || win->has_rotation) ? STRIP_H : 0;
 
-    win->window = SDL_CreateWindow(title ? title : "esp32-sim",
+    win->window = SDL_CreateWindow(title ? title : "esprite",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         (w + win->chrome) * scale, (h + win->strip) * scale, SDL_WINDOW_ALLOW_HIGHDPI);
     if (!win->window) {

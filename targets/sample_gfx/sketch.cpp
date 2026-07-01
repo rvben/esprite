@@ -1,5 +1,5 @@
 // A minimal Arduino sketch that uses only the Arduino core and Arduino_GFX.
-// It has no custom HAL and no esp32-sim-specific code: it runs purely against
+// It has no custom HAL and no esprite-specific code: it runs purely against
 // the framework's shims and the GFX-to-framebuffer peripheral. This is the
 // generality proof - onboarding it needed only a board.cpp registration.
 #include <Arduino.h>

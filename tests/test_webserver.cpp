@@ -28,7 +28,7 @@ static void http_post(int port, const std::string& path, const std::string& body
 TEST_CASE("webserver delivers a real POST body to the registered handler") {
     // Bind an ephemeral port so a leftover listener from a prior run can never
     // collide with a fixed port and make this test spuriously fail.
-    setenv("CLAWDSIM_HTTP_PORT", "0", 1);
+    setenv("ESPRITE_HTTP_PORT", "0", 1);
     WebServer server(80);
     std::string captured;
     server.on("/snapshot", HTTP_POST, [&]() {
@@ -41,5 +41,5 @@ TEST_CASE("webserver delivers a real POST body to the registered handler") {
     http_post(port, "/snapshot", "{\"lim\":1,\"s5\":42}");
     server.handleClient();
     CHECK(captured == "{\"lim\":1,\"s5\":42}");
-    unsetenv("CLAWDSIM_HTTP_PORT");       // don't leak the ephemeral setting to other tests
+    unsetenv("ESPRITE_HTTP_PORT");       // don't leak the ephemeral setting to other tests
 }

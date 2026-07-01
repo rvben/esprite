@@ -66,7 +66,7 @@ static std::string multipart(const std::string& boundary, const std::string& fil
 TEST_CASE("clawdmeter boots, renders, serves snapshots, and gates OTA /update") {
     // Bind an ephemeral port so a leftover listener can never collide with a
     // fixed one; sim_wifi_post and the OTA sockets both use the bound port.
-    setenv("CLAWDSIM_HTTP_PORT", "0", 1);
+    setenv("ESPRITE_HTTP_PORT", "0", 1);
     sim_serial_clear();
 
     REQUIRE(sim_boot("clawdmeter"));
@@ -76,14 +76,14 @@ TEST_CASE("clawdmeter boots, renders, serves snapshots, and gates OTA /update") 
     CHECK(sim_serial_contains("Dashboard ready"));
 
     // A real 480x480 screenshot is produced (the C6 cannot do this on hardware).
-    REQUIRE(sim_screenshot_png("/tmp/esp32sim_itest_boot.png"));
+    REQUIRE(sim_screenshot_png("/tmp/esprite_itest_boot.png"));
     uint32_t before = fb_hash();
 
     // Inject a limits snapshot through the genuine HTTP -> apply_lim path.
     sim_wifi_post("/snapshot",
         "{\"lim\":1,\"s5\":42,\"s5r\":180,\"s7\":10,\"s7r\":6000,\"ctx\":55,\"cost\":1.5,\"model\":\"opus\"}");
     sim_run_steps(10);
-    sim_screenshot_png("/tmp/esp32sim_itest_limits.png");
+    sim_screenshot_png("/tmp/esprite_itest_limits.png");
 
     // The injected data changed what is rendered.
     CHECK(fb_hash() != before);

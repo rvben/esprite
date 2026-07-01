@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(esp32sim CXX C)
+project(esprite CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -153,9 +153,9 @@ if(SDL2_FOUND)
     target_link_libraries(cli_lib PUBLIC sim_window)   # propagates HAVE_SDL2
 endif()
 
-add_executable(esp32sim cli/main.cpp)
-target_link_libraries(esp32sim PRIVATE cli_lib)
-link_sim_targets(esp32sim)
+add_executable(esprite cli/main.cpp)
+target_link_libraries(esprite PRIVATE cli_lib)
+link_sim_targets(esprite)
 
 # Unit-test executable. Grows as components are added.
 add_executable(sim_tests

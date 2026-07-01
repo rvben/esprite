@@ -13,6 +13,6 @@ TEST_CASE("sample_gfx boots and renders with zero app-specific sim code") {
     REQUIRE(sim_boot("sample_gfx"));
     sim_run_steps(60);
     CHECK(sim_serial_contains("sample_gfx: ready"));
-    REQUIRE(sim_screenshot_png("/tmp/esp32sim_itest_sample.png"));
+    REQUIRE(sim_screenshot_png("/tmp/esprite_itest_sample.png"));
     CHECK(sim_framebuffer().pixel(50, 30) == 0xF800);   // red RGB test bar
 }

@@ -4,8 +4,8 @@
 #include <sys/stat.h>
 
 static std::string state_dir() {
-    const char* d = getenv("CLAWDSIM_STATE_DIR");
-    return d ? d : "/tmp/esp32sim";
+    const char* d = getenv("ESPRITE_STATE_DIR");
+    return d ? d : "/tmp/esprite";
 }
 
 bool Preferences::begin(const char* ns, bool readOnly) {

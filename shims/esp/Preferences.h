@@ -5,7 +5,7 @@
 #include <map>
 
 // File-backed NVS shim so saved settings persist across runs. Storage path from
-// env CLAWDSIM_STATE_DIR (default /tmp/esp32sim), one file per namespace.
+// env ESPRITE_STATE_DIR (default /tmp/esprite), one file per namespace.
 class Preferences {
 public:
     bool begin(const char* ns, bool readOnly);

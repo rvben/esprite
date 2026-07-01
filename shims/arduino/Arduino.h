@@ -42,7 +42,7 @@ int  digitalRead(int pin);
 inline int analogRead(int) { return 0; }
 
 // Injected GPIO state: the CLI and live window set levels here (a physical
-// button wired to a pin, or `esp32sim gpio PIN LEVEL`), and digitalRead reads
+// button wired to a pin, or `esprite gpio PIN LEVEL`), and digitalRead reads
 // them, so standard-library sketches that poll pins work in the sim.
 int  sim_gpio_get(int pin);
 void sim_gpio_set(int pin, int level);

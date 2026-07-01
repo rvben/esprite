@@ -3,8 +3,8 @@
 #include <cstdlib>
 
 TEST_CASE("putUChar persists across Preferences instances") {
-    setenv("CLAWDSIM_STATE_DIR", "/tmp/esp32sim_test_prefs", 1);
-    system("rm -rf /tmp/esp32sim_test_prefs");
+    setenv("ESPRITE_STATE_DIR", "/tmp/esprite_test_prefs", 1);
+    system("rm -rf /tmp/esprite_test_prefs");
     {
         Preferences p; p.begin("clawdmeter", false);
         p.putUChar("brt_idx", 3);

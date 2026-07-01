@@ -3,7 +3,7 @@
 
 // Provisioning shim. autoConnect returns connected instantly. The AP callback
 // path is available so a target can screenshot its captive-portal hint by
-// setting the env CLAWDSIM_WIFI_PORTAL=1 before boot.
+// setting the env ESPRITE_WIFI_PORTAL=1 before boot.
 class WiFiManager {
 public:
     typedef void (*ApCb)(WiFiManager*);
@@ -15,7 +15,7 @@ public:
     bool autoConnect(const char* ap_ssid = nullptr) {
         // Only open the simulated captive portal when it is enabled (the trial
         // connect path disables it) and the env opts in; otherwise connect.
-        const char* portal = getenv("CLAWDSIM_WIFI_PORTAL");
+        const char* portal = getenv("ESPRITE_WIFI_PORTAL");
         if (portal_enabled_ && portal && portal[0] == '1' && ap_cb_) { ap_cb_(this); return false; }
         (void)ap_ssid;
         return true;
