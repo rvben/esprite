@@ -1,0 +1,21 @@
+# Every step is a make target, runnable locally as-is. The Clawdmeter firmware
+# is a private sibling checkout, so CI exercises the public build: the generic
+# targets (sample_gfx, cyd, cyd_tft), the shims, and both test suites.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: make build
+      - run: make test

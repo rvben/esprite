@@ -22,14 +22,20 @@ plus a touch bus (`sim_touch`) for non-LVGL sketches.
 ```bash
 make build
 ./build/esprite list-targets
-make screenshot TARGET=waveshare_amoled_216_c6   # writes waveshare_amoled_216_c6.png
-make screenshot TARGET=sample_gfx                # writes sample_gfx.png
+make screenshot TARGET=sample_gfx     # writes sample_gfx.png
+make screenshot TARGET=cyd_tft        # writes cyd_tft.png
 make test                             # unit + integration tests
+make install PREFIX=~/.local          # optimized build onto your PATH
 ```
 
 Requirements: CMake >= 3.20 and a C++17 compiler (Apple clang or gcc/clang on
 Linux). LVGL and ArduinoJson are fetched automatically; doctest and stb are
 vendored.
+
+The two Waveshare targets run the Clawdmeter firmware, which lives in a
+separate checkout: without it the build skips them (with a CMake warning) and
+everything else works. Point `-DCLAWDMETER_SRC=/path/to/firmware/src` at it to
+enable them.
 
 ## Screenshots
 
@@ -67,9 +73,11 @@ esprite <command> [--target NAME] [args]
 
 list-targets                     list onboarded targets
 schema                           machine-readable JSON of all commands
+--version                        print name and version
+ui                               snapshot the LVGL widget tree (refs for tap --ref)
 screenshot OUT.png [--steps N]   boot, run, write a PNG
 snapshot '<json>' [--path P] [--shot OUT]   POST to the device webserver
-tap X Y [--shot OUT]             inject a touch
+tap X Y | tap --ref eN [--shot OUT]         inject a touch
 button primary|secondary|pwr [--shot OUT]   press a button
 battery PCT [--charging] [--no-vbus] [--shot OUT]
 rotate 0..3 [--shot OUT]         set IMU rotation quadrant
@@ -82,6 +90,9 @@ serve [--window] [--scale N]     boot and keep pumping for a live bridge; --wind
                                  opens an interactive SDL window (mouse/keys drive it)
 run                              daemon: newline-delimited JSON commands on stdin
 ```
+
+Errors are structured (`{"error":{"kind":...,"message":...}}` on stderr) with
+documented exit codes per kind; see `esprite schema`.
 
 Scenarios are ordered JSON steps, useful in CI:
 
@@ -115,13 +126,14 @@ an agent reads the UI structurally instead of guessing pixels. `tap --ref` acts
 on a ref; `tap X Y` is the pixel fallback.
 
 The `run` daemon is a persistent session where refs from `ui` stay valid across
-the session:
+the session (one boot per session; `steps` advances virtual time explicitly):
 
 ```
 {"cmd":"boot","target":"waveshare_amoled_216_c6"}
 {"cmd":"snapshot","data":{"lim":1,"s5":42,"s7":10,"ctx":55,"cost":1.5,"model":"opus"}}
 {"cmd":"ui"}                              # read the updated tree, get refs
 {"cmd":"tap","ref":"e6"}                  # act on a ref
+{"cmd":"steps","n":50}                    # run 50 loop() iterations
 {"cmd":"screenshot","out":"out.png"}
 {"cmd":"quit"}
 ```
@@ -156,7 +168,7 @@ target, and either:
 - **nothing else**, if the app only uses APIs the shims already cover (Serial,
   Wire, WiFi, Arduino_GFX). See `targets/sample_gfx/`.
 - **a small board adapter**, if the app hides hardware behind its own HAL. See
-  `targets/clawdmeter/board_sim/`, which implements Clawdmeter's six HAL
+  `firmwares/clawdmeter/board_sim/`, which implements Clawdmeter's six HAL
   interfaces against the framebuffer and the injected input bus.
 
 Register the target in `board.cpp`:
