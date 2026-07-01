@@ -29,15 +29,18 @@ target_include_directories(shims PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/shims/net)
 target_link_libraries(shims PUBLIC third_party)
 
-# Virtual peripherals (display framebuffer, PNG screenshot, injected input bus).
+# Virtual peripherals (display framebuffer, PNG screenshot, injected input bus,
+# generic Arduino_GFX-to-framebuffer shim).
 add_library(peripherals STATIC
     peripherals/display/framebuffer.cpp
     peripherals/display/screenshot.cpp
     peripherals/input/sim_input.cpp
+    peripherals/gfx/arduino_gfx.cpp
 )
 target_include_directories(peripherals PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/display
-    ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/input)
+    ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/input
+    ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/gfx)
 target_link_libraries(peripherals PUBLIC third_party)
 
 # Core runtime + target registry.
@@ -123,6 +126,7 @@ add_executable(sim_tests
     tests/test_screenshot.cpp
     tests/test_target.cpp
     tests/test_lvgl_smoke.cpp
+    tests/test_gfx.cpp
     tests/test_cli.cpp
 )
 target_link_libraries(sim_tests PRIVATE cli_lib)
@@ -130,7 +134,10 @@ link_sim_targets(sim_tests)
 
 # Integration tests that boot real targets, isolated from unit tests so LVGL
 # global state stays clean.
-add_executable(sim_itests tests/itest_clawdmeter.cpp)
+add_executable(sim_itests
+    tests/itest_clawdmeter.cpp
+    tests/itest_sample_gfx.cpp
+)
 target_link_libraries(sim_itests PRIVATE cli_lib)
 link_sim_targets(sim_itests)
 
