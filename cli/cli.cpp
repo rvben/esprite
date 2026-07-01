@@ -16,14 +16,25 @@
 #include <cstring>
 #include <cstdlib>
 #include <string>
+#include <vector>
 #include <thread>
 #include <chrono>
+#include <unistd.h>
 
 static const int WARMUP_STEPS = 60;
 
 static const char* kSchema = R"JSON({
   "clispec": "0.2",
-  "description": "Host-native ESP32 simulator. Boots a target's firmware, renders its UI, and drives it: snapshot-ref UI reads, input injection, screenshots, and a persistent JSON session. Results are JSON on stdout; logs go to stderr. Global option --target NAME selects the target (from list-targets); optional when exactly one is registered.",
+  "name": "esp32sim",
+  "version": "0.1.0",
+  "description": "Host-native ESP32 simulator. Boots a target's firmware, renders its UI, and drives it: snapshot-ref UI reads, input injection, screenshots, and a persistent JSON session. Results are JSON on stdout; logs go to stderr.",
+  "global_args": [
+    { "name": "--output", "description": "Output format. auto = text on a TTY, JSON when piped.", "type": "string", "enum": ["auto", "json", "text"], "default": "auto" },
+    { "name": "--target", "description": "Target to boot (see list-targets). Optional when exactly one is registered.", "type": "string" },
+    { "name": "--limit", "description": "Max items to return from list commands (list-targets, ui).", "type": "number" },
+    { "name": "--offset", "description": "Items to skip from list commands (pagination).", "type": "number" },
+    { "name": "--fields", "description": "Comma-separated fields to include from list-targets items.", "type": "string" }
+  ],
   "commands": [
     { "name": "schema", "description": "Print this clispec contract as JSON.", "mutating": false, "stability": "stable" },
     { "name": "list-targets", "description": "List onboarded targets with board metadata.", "mutating": false, "stability": "stable",
@@ -101,7 +112,9 @@ static const char* kSchema = R"JSON({
     { "kind": "no_target", "description": "No --target and more than one target registered.", "exit_code": 2 },
     { "kind": "unknown_target", "description": "The --target is not registered (see list-targets).", "exit_code": 2 },
     { "kind": "bind_failed", "description": "serve could not bind the HTTP port (already in use).", "exit_code": 3 },
-    { "kind": "ref_not_found", "description": "tap --ref referenced a widget not in the current ui snapshot.", "exit_code": 4 }
+    { "kind": "ref_not_found", "description": "tap --ref referenced a widget not in the current ui snapshot.", "exit_code": 4 },
+    { "kind": "conflict", "description": "An argument or option conflicts with another (e.g. tap given both --ref and x/y).", "exit_code": 5 },
+    { "kind": "bad_args", "description": "Missing or invalid arguments for the command.", "exit_code": 2 }
   ]
 })JSON";
 
@@ -118,7 +131,8 @@ static bool opt_flag(int argc, char** argv, const char* name) {
 // Positional args after the command, skipping options and their values.
 static std::string positional(int argc, char** argv, int index) {
     static const char* val_opts[] = {"--target", "--steps", "--path", "--shot",
-                                     "--port", "--interval-ms", "--scale", "--ref"};
+                                     "--port", "--interval-ms", "--scale", "--ref",
+                                     "--output", "-o", "--limit", "--offset", "--fields"};
     int seen = 0;
     for (int i = 2; i < argc; ++i) {
         bool is_opt = argv[i][0] == '-' && argv[i][1] == '-';
@@ -137,13 +151,16 @@ static std::string resolve_target(int argc, char** argv) {
     return "";
 }
 
+static int fail(const char* kind, const std::string& msg, int code);  // defined below
+
+// Boots the resolved target. Returns 0 on success, or a non-zero exit code after
+// emitting the error envelope (2 for target problems).
 static int boot_or_die(int argc, char** argv) {
     std::string t = resolve_target(argc, argv);
-    if (t.empty()) {
-        fprintf(stderr, "no --target given and %d targets registered\n", sim_target_count());
-        return -1;
-    }
-    if (!sim_boot(t)) { fprintf(stderr, "unknown target '%s'\n", t.c_str()); return -1; }
+    if (t.empty())
+        return fail("no_target", "no --target and more than one target registered", 2);
+    if (!sim_boot(t))
+        return fail("unknown_target", "unknown target '" + t + "'", 2);
     sim_run_steps(WARMUP_STEPS);
     return 0;
 }
@@ -173,7 +190,52 @@ static std::string json_esc(const std::string& s) {
 }
 static const char* jbool(bool b) { return b ? "true" : "false"; }
 
+// Output mode: JSON when piped or forced with --output json; text on a TTY or
+// with --output text. Explicit --output wins over TTY detection.
+static bool g_json = true;
+static void set_output_mode(int argc, char** argv) {
+    const char* om = opt_val(argc, argv, "--output");
+    if (!om) om = opt_val(argc, argv, "-o");
+    std::string m = om ? om : "auto";
+    if (m == "json")      g_json = true;
+    else if (m == "text") g_json = false;
+    else                  g_json = !isatty(fileno(stdout));
+}
+static void emit(const std::string& json, const std::string& text) {
+    printf("%s\n", (g_json ? json : text).c_str());
+}
+// Slice a JSON array-of-objects string by --offset/--limit and wrap it with
+// truncation metadata: {"items":[...],"total","offset","count","truncated"}.
+static std::string bounded_array(const std::string& arr, int offset, int limit) {
+    std::vector<std::string> elems;
+    int depth = 0; size_t start = std::string::npos;
+    for (size_t i = 0; i < arr.size(); ++i) {
+        if (arr[i] == '{') { if (depth++ == 0) start = i; }
+        else if (arr[i] == '}') {
+            if (--depth == 0 && start != std::string::npos) {
+                elems.push_back(arr.substr(start, i - start + 1)); start = std::string::npos;
+            }
+        }
+    }
+    if (offset < 0) offset = 0;
+    int total = (int)elems.size(), shown = 0;
+    std::string items = "[";
+    for (int i = offset; i < total && (limit < 0 || shown < limit); ++i, ++shown)
+        items += (shown ? "," : "") + elems[i];
+    items += "]";
+    bool truncated = (offset + shown) < total;
+    return "{\"items\":" + items + ",\"total\":" + std::to_string(total) +
+           ",\"offset\":" + std::to_string(offset) + ",\"count\":" + std::to_string(shown) +
+           ",\"truncated\":" + jbool(truncated) + "}";
+}
+// Structured error envelope as the last line of stderr; returns the exit code.
+static int fail(const char* kind, const std::string& msg, int code) {
+    fprintf(stderr, "{\"error\":{\"kind\":\"%s\",\"message\":\"%s\"}}\n", kind, json_esc(msg).c_str());
+    return code;
+}
+
 int esp32sim_main(int argc, char** argv) {
+    set_output_mode(argc, argv);
     if (argc < 2 || !strcmp(argv[1], "--help") || !strcmp(argv[1], "help")) {
         printf("%s\n", kSchema);
         return argc < 2 ? 1 : 0;
@@ -183,16 +245,33 @@ int esp32sim_main(int argc, char** argv) {
     if (cmd == "schema") { printf("%s\n", kSchema); return 0; }
 
     if (cmd == "list-targets") {
-        printf("[");
-        for (int i = 0; i < sim_target_count(); ++i) {
+        int offset = opt_val(argc, argv, "--offset") ? atoi(opt_val(argc, argv, "--offset")) : 0;
+        int limit  = opt_val(argc, argv, "--limit")  ? atoi(opt_val(argc, argv, "--limit"))  : -1;
+        const char* fields = opt_val(argc, argv, "--fields");
+        auto want = [&](const char* f) { return !fields || strstr(fields, f) != nullptr; };
+        int total = sim_target_count();
+        std::string json = "{\"items\":[", text;
+        int shown = 0;
+        for (int i = offset; i < total && (limit < 0 || shown < limit); ++i, ++shown) {
             const SimTarget* t = sim_target_at(i);
-            printf("%s{\"key\":\"%s\",\"name\":\"%s\",\"width\":%d,\"height\":%d,"
-                   "\"buttons\":%d,\"battery\":%s,\"rotation\":%s,\"description\":\"%s\"}",
-                   i ? "," : "", t->key, t->board->name, t->board->width, t->board->height,
-                   t->board->button_count, jbool(t->board->has_battery),
-                   jbool(t->board->has_rotation), json_esc(t->description ? t->description : "").c_str());
+            std::string o = "{";
+            if (want("key"))    o += "\"key\":\"" + std::string(t->key) + "\",";
+            if (want("name"))   o += "\"name\":\"" + json_esc(t->board->name) + "\",";
+            if (want("width"))  o += "\"width\":" + std::to_string(t->board->width) + ",";
+            if (want("height")) o += "\"height\":" + std::to_string(t->board->height) + ",";
+            if (want("buttons"))o += "\"buttons\":" + std::to_string(t->board->button_count) + ",";
+            if (want("battery"))o += std::string("\"battery\":") + jbool(t->board->has_battery) + ",";
+            if (want("rotation"))o += std::string("\"rotation\":") + jbool(t->board->has_rotation) + ",";
+            if (!o.empty() && o.back() == ',') o.pop_back();
+            o += "}";
+            json += (shown ? "," : "") + o;
+            text += std::string(t->key) + "  " + std::to_string(t->board->width) + "x" +
+                    std::to_string(t->board->height) + "  " + t->board->name + "\n";
         }
-        printf("]\n");
+        bool truncated = (offset + shown) < total;
+        json += "],\"total\":" + std::to_string(total) + ",\"offset\":" + std::to_string(offset) +
+                ",\"count\":" + std::to_string(shown) + ",\"truncated\":" + jbool(truncated) + "}";
+        emit(json, text.empty() ? "(no targets)" : text.substr(0, text.size() - 1));
         return 0;
     }
 
@@ -200,7 +279,7 @@ int esp32sim_main(int argc, char** argv) {
 
     if (cmd == "scenario") {
         std::string file = positional(argc, argv, 0);
-        if (file.empty()) { fprintf(stderr, "scenario: need a file\n"); return 2; }
+        if (file.empty()) return fail("bad_args", "scenario needs a file path", 2);
         std::string def = resolve_target(argc, argv);
         return scenario_run(file, def.empty() ? "clawdmeter" : def);
     }
@@ -211,19 +290,16 @@ int esp32sim_main(int argc, char** argv) {
         // Refresh a screenshot every --interval-ms if --shot is given.
         if (const char* p = opt_val(argc, argv, "--port")) setenv("CLAWDSIM_HTTP_PORT", p, 1);
         std::string t = resolve_target(argc, argv);
-        if (t.empty()) { fprintf(stderr, "serve: need --target\n"); return 2; }
-        if (!sim_boot(t)) { fprintf(stderr, "serve: unknown target '%s'\n", t.c_str()); return 2; }
+        if (t.empty()) return fail("no_target", "no --target and more than one target registered", 2);
+        if (!sim_boot(t)) return fail("unknown_target", "unknown target '" + t + "'", 2);
         sim_run_steps(WARMUP_STEPS);
 
         const char* shot = opt_val(argc, argv, "--shot");
         const char* port = getenv("CLAWDSIM_HTTP_PORT");
         // If the target ran an HTTP server but its bind failed (port in use), a
         // live bridge could never reach it. Fail loudly instead of looping.
-        if (sim_http_bind_status() == 0) {
-            fprintf(stderr, "serve: failed to bind HTTP port %s (already in use?)\n",
-                    port ? port : "8080");
-            return 3;
-        }
+        if (sim_http_bind_status() == 0)
+            return fail("bind_failed", std::string("could not bind HTTP port ") + (port ? port : "8080"), 3);
         int interval = 1000;
         if (const char* iv = opt_val(argc, argv, "--interval-ms")) interval = atoi(iv);
 
@@ -281,8 +357,12 @@ int esp32sim_main(int argc, char** argv) {
     if (boot_or_die(argc, argv) != 0) return 2;
 
     if (cmd == "ui") {
-        // Snapshot-ref model: the LVGL widget tree of the current screen.
-        printf("%s\n", lvgl_snapshot_json().c_str());
+        // Snapshot-ref model: the LVGL widget tree of the current screen. Bounded
+        // by --offset/--limit; --fields not applied (elements are already compact).
+        int offset = opt_val(argc, argv, "--offset") ? atoi(opt_val(argc, argv, "--offset")) : 0;
+        int limit  = opt_val(argc, argv, "--limit")  ? atoi(opt_val(argc, argv, "--limit"))  : -1;
+        std::string tree = lvgl_snapshot_json();
+        emit(bounded_array(tree, offset, limit), tree);
         return 0;
     }
     if (cmd == "screenshot") {
@@ -290,39 +370,40 @@ int esp32sim_main(int argc, char** argv) {
         if (out.empty()) out = "esp32sim.png";
         if (const char* s = opt_val(argc, argv, "--steps")) sim_run_steps(atoi(s));
         bool ok = sim_screenshot_png(out.c_str());
-        printf("{\"ok\":%s,\"path\":\"%s\",\"w\":%d,\"h\":%d}\n",
-               jbool(ok), json_esc(out).c_str(), sim_framebuffer().w(), sim_framebuffer().h());
+        int w = sim_framebuffer().w(), h = sim_framebuffer().h();
+        emit("{\"ok\":" + std::string(jbool(ok)) + ",\"path\":\"" + json_esc(out) + "\",\"w\":" +
+             std::to_string(w) + ",\"h\":" + std::to_string(h) + "}",
+             (ok ? "wrote " : "FAILED ") + out + " (" + std::to_string(w) + "x" + std::to_string(h) + ")");
         return ok ? 0 : 1;
     }
     if (cmd == "snapshot") {
         std::string json = positional(argc, argv, 0);
-        const char* path = opt_val(argc, argv, "--path");
-        sim_wifi_post(path ? path : "/snapshot", json);
+        sim_wifi_post(opt_val(argc, argv, "--path") ? opt_val(argc, argv, "--path") : "/snapshot", json);
         maybe_shot(argc, argv);
-        printf("{\"ok\":true}\n");
+        emit("{\"ok\":true}", "posted snapshot");
         return 0;
     }
     if (cmd == "tap") {
+        bool has_ref = opt_val(argc, argv, "--ref") != nullptr;
+        bool has_xy  = !positional(argc, argv, 0).empty();
+        if (has_ref && has_xy) return fail("conflict", "tap takes --ref or x/y, not both", 5);
         int x, y;
-        if (const char* ref = opt_val(argc, argv, "--ref")) {
-            if (!lvgl_ref_center(ref, &x, &y)) {
-                printf("{\"ok\":false,\"error\":\"ref_not_found\",\"ref\":\"%s\"}\n", json_esc(ref).c_str());
-                return 4;
-            }
-            sim_input().touch_pressed = true; sim_input().touch_x = x; sim_input().touch_y = y;
-            sim_run_steps(4);
-            sim_input().touch_pressed = false; sim_run_steps(4);
-            maybe_shot(argc, argv);
-            printf("{\"ok\":true,\"ref\":\"%s\",\"x\":%d,\"y\":%d}\n", json_esc(ref).c_str(), x, y);
-            return 0;
+        std::string extra;
+        if (has_ref) {
+            std::string ref = opt_val(argc, argv, "--ref");
+            if (!lvgl_ref_center(ref, &x, &y))
+                return fail("ref_not_found", "no widget with ref " + ref + " in the current ui snapshot", 4);
+            extra = ",\"ref\":\"" + json_esc(ref) + "\"";
+        } else {
+            x = atoi(positional(argc, argv, 0).c_str());
+            y = atoi(positional(argc, argv, 1).c_str());
         }
-        x = atoi(positional(argc, argv, 0).c_str());
-        y = atoi(positional(argc, argv, 1).c_str());
         sim_input().touch_pressed = true; sim_input().touch_x = x; sim_input().touch_y = y;
         sim_run_steps(4);
         sim_input().touch_pressed = false; sim_run_steps(4);
         maybe_shot(argc, argv);
-        printf("{\"ok\":true,\"x\":%d,\"y\":%d}\n", x, y);
+        emit("{\"ok\":true" + extra + ",\"x\":" + std::to_string(x) + ",\"y\":" + std::to_string(y) + "}",
+             "tapped " + std::to_string(x) + "," + std::to_string(y));
         return 0;
     }
     if (cmd == "button") {
@@ -334,7 +415,7 @@ int esp32sim_main(int argc, char** argv) {
             sim_input().button[idx] = false; sim_run_steps(3);
         }
         maybe_shot(argc, argv);
-        printf("{\"ok\":true,\"button\":\"%s\"}\n", json_esc(which).c_str());
+        emit("{\"ok\":true,\"button\":\"" + json_esc(which) + "\"}", "pressed " + which);
         return 0;
     }
     if (cmd == "battery") {
@@ -343,15 +424,17 @@ int esp32sim_main(int argc, char** argv) {
         if (opt_flag(argc, argv, "--no-vbus"))  sim_input().vbus = false;
         sim_run_steps(5);
         maybe_shot(argc, argv);
-        printf("{\"ok\":true,\"pct\":%d,\"charging\":%s,\"vbus\":%s}\n",
-               sim_input().battery_pct, jbool(sim_input().charging), jbool(sim_input().vbus));
+        emit("{\"ok\":true,\"pct\":" + std::to_string(sim_input().battery_pct) + ",\"charging\":" +
+             jbool(sim_input().charging) + ",\"vbus\":" + jbool(sim_input().vbus) + "}",
+             "battery " + std::to_string(sim_input().battery_pct) + "%");
         return 0;
     }
     if (cmd == "rotate") {
         sim_input().quadrant = atoi(positional(argc, argv, 0).c_str());
         sim_run_steps(5);
         maybe_shot(argc, argv);
-        printf("{\"ok\":true,\"quadrant\":%d}\n", sim_input().quadrant);
+        emit("{\"ok\":true,\"quadrant\":" + std::to_string(sim_input().quadrant) + "}",
+             "quadrant " + std::to_string(sim_input().quadrant));
         return 0;
     }
     if (cmd == "gpio") {
@@ -359,33 +442,32 @@ int esp32sim_main(int argc, char** argv) {
         int lvl = atoi(positional(argc, argv, 1).c_str());
         sim_gpio_set(pin, lvl);
         sim_run_steps(5);
-        printf("{\"ok\":true,\"pin\":%d,\"level\":%d}\n", pin, lvl ? 1 : 0);
+        emit("{\"ok\":true,\"pin\":" + std::to_string(pin) + ",\"level\":" + std::to_string(lvl ? 1 : 0) + "}",
+             "gpio " + std::to_string(pin) + "=" + std::to_string(lvl ? 1 : 0));
         return 0;
     }
     if (cmd == "serial") {
-        std::string sub = positional(argc, argv, 0);
-        std::string arg = positional(argc, argv, 1);
+        std::string sub = positional(argc, argv, 0), arg = positional(argc, argv, 1);
         if (sub == "send") {
             sim_serial_inject(arg + "\n"); sim_run_steps(5);
-            printf("{\"ok\":true}\n");
+            emit("{\"ok\":true}", "sent");
             return 0;
         }
         if (sub == "expect") {
             sim_run_steps(WARMUP_STEPS);
             bool matched = sim_serial_contains(arg);
-            printf("{\"matched\":%s}\n", jbool(matched));
+            emit("{\"matched\":" + std::string(jbool(matched)) + "}", matched ? "matched" : "no match");
             return matched ? 0 : 1;
         }
-        fprintf(stderr, "serial: use 'send TEXT' or 'expect REGEX'\n");
-        return 2;
+        return fail("bad_args", "serial takes 'send TEXT' or 'expect REGEX'", 2);
     }
     if (cmd == "logs") {
-        printf("{\"serial\":\"%s\"}\n", json_esc(sim_serial_output()).c_str());
+        std::string s = sim_serial_output();
+        emit("{\"serial\":\"" + json_esc(s) + "\"}", s);
         return 0;
     }
 
-    fprintf(stderr, "unknown command '%s' (try schema)\n", cmd.c_str());
-    return 2;
+    return fail("bad_args", "unknown command '" + cmd + "' (try: esp32sim schema)", 2);
 }
 
 // Daemon: a persistent agent session. Read newline-delimited JSON commands on
