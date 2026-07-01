@@ -26,14 +26,21 @@
 
 static const int WARMUP_STEPS = 60;
 
-static const char* kSchema = R"JSON({
+// Stamped by the build from the CMake project version: one source of truth
+// for --version, the schema, and the release tag.
+#ifndef ESPRITE_VERSION
+#define ESPRITE_VERSION "dev"
+#endif
+
+static const std::string kSchema = std::string(R"JSON({
   "clispec": "0.2",
   "name": "esprite",
-  "version": "0.1.0",
+  "version": ")JSON") + ESPRITE_VERSION + R"JSON(",
   "description": "Host-native ESP32 simulator. Boots a target's firmware, renders its UI, and drives it: snapshot-ref UI reads, input injection, screenshots, and a persistent JSON session. Results are JSON on stdout; logs go to stderr.",
   "global_args": [
     { "name": "--output", "description": "Output format. auto = text on a TTY, JSON when piped.", "type": "string", "enum": ["auto", "json", "text"], "default": "auto" },
     { "name": "--json", "description": "Shorthand for --output json.", "type": "boolean" },
+    { "name": "--version", "description": "Print name and version.", "type": "boolean" },
     { "name": "--target", "description": "Target to boot (see list-targets). Optional when exactly one is registered.", "type": "string" },
     { "name": "--limit", "description": "Max items to return from list commands (list-targets, ui).", "type": "number" },
     { "name": "--offset", "description": "Items to skip from list commands (pagination).", "type": "number" },
@@ -130,7 +137,7 @@ static const char* kSchema = R"JSON({
 static const char* kValOpts[]  = {"--target", "--steps", "--path", "--shot",
                                   "--port", "--interval-ms", "--scale", "--ref",
                                   "--output", "-o", "--limit", "--offset", "--fields"};
-static const char* kFlagOpts[] = {"--charging", "--no-vbus", "--window", "--json", "--help"};
+static const char* kFlagOpts[] = {"--charging", "--no-vbus", "--window", "--json", "--help", "--version"};
 
 static bool is_val_opt(const char* a)  { for (auto* o : kValOpts)  if (!strcmp(a, o)) return true; return false; }
 static bool is_flag_opt(const char* a) { for (auto* o : kFlagOpts) if (!strcmp(a, o)) return true; return false; }
@@ -270,13 +277,18 @@ static std::string bounded_array(const std::string& arr, int offset, int limit) 
 int esprite_main(int argc, char** argv) {
     set_output_mode(argc, argv);
     if (argc < 2 || !strcmp(argv[1], "--help") || !strcmp(argv[1], "help")) {
-        printf("%s\n", kSchema);
+        printf("%s\n", kSchema.c_str());
         return argc < 2 ? 1 : 0;
     }
     std::string cmd = argv[1];
 
-    if (cmd == "schema") { printf("%s\n", kSchema); return 0; }
-    if (opt_flag(argc, argv, "--help")) { printf("%s\n", kSchema); return 0; }
+    if (cmd == "schema") { printf("%s\n", kSchema.c_str()); return 0; }
+    if (cmd == "--version" || cmd == "version") {
+        emit(std::string("{\"name\":\"esprite\",\"version\":\"") + ESPRITE_VERSION + "\"}",
+             std::string("esprite ") + ESPRITE_VERSION);
+        return 0;
+    }
+    if (opt_flag(argc, argv, "--help")) { printf("%s\n", kSchema.c_str()); return 0; }
     if (int rc = validate_options(argc, argv)) return rc;
 
     if (cmd == "list-targets") {

@@ -1,13 +1,24 @@
-BUILD  ?= build
-TARGET ?= waveshare_amoled_216_c6
+BUILD   ?= build
+RELEASE ?= build-release
+PREFIX  ?= /usr/local
+TARGET  ?= waveshare_amoled_216_c6
 
-.PHONY: configure build test screenshot scenario goldens clean
+.PHONY: configure build test screenshot scenario goldens release install clean
 
 configure:
 	cmake -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Debug
 
 build: configure
 	cmake --build $(BUILD) -j
+
+# Optimized binary in $(RELEASE)/esprite.
+release:
+	cmake -S . -B $(RELEASE) -DCMAKE_BUILD_TYPE=Release
+	cmake --build $(RELEASE) -j
+
+# Install the release binary to $(PREFIX)/bin (override PREFIX=~/.local).
+install: release
+	cmake --install $(RELEASE) --prefix $(PREFIX)
 
 # Unit tests (sim_tests) and target integration tests (sim_itests).
 test: build
@@ -28,4 +39,4 @@ goldens: build
 	cd goldens && ../$(BUILD)/esprite scenario ../scenarios/$(TARGET).json
 
 clean:
-	rm -rf $(BUILD)
+	rm -rf $(BUILD) $(RELEASE)

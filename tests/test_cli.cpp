@@ -56,6 +56,45 @@ TEST_CASE("commands reject capabilities the active board lacks") {
     CHECK(run_cli({"esprite", "button", "primary", "--target", "sample_gfx"}) == 7);
 }
 
+// Like run_cli_err, but captures stdout (the result payload).
+static int run_cli_out(std::initializer_list<const char*> args, std::string* out) {
+    fflush(stdout);
+    int saved = dup(fileno(stdout));
+    FILE* tmp = tmpfile();
+    REQUIRE(tmp != nullptr);
+    dup2(fileno(tmp), fileno(stdout));
+    int rc = run_cli(args);
+    fflush(stdout);
+    dup2(saved, fileno(stdout));
+    close(saved);
+    rewind(tmp);
+    char buf[65536];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, tmp);
+    fclose(tmp);
+    out->assign(buf, n);
+    return rc;
+}
+
+TEST_CASE("--version prints the tool name and version") {
+    std::string out;
+    CHECK(run_cli_out({"esprite", "--version"}, &out) == 0);
+    CHECK(out.find("\"name\":\"esprite\"") != std::string::npos);
+    CHECK(out.find("\"version\"") != std::string::npos);
+}
+
+TEST_CASE("the schema version matches the binary's --version") {
+    std::string schema, version;
+    REQUIRE(run_cli_out({"esprite", "schema"}, &schema) == 0);
+    REQUIRE(run_cli_out({"esprite", "--version"}, &version) == 0);
+    // Extract "version":"X" from --version output and require the schema to
+    // carry the same string: one source of truth, no drift.
+    size_t k = version.find("\"version\":\"");
+    REQUIRE(k != std::string::npos);
+    size_t start = k + 11, end = version.find('"', start);
+    std::string v = version.substr(start, end - start);
+    CHECK(schema.find("\"version\": \"" + v + "\"") != std::string::npos);
+}
+
 TEST_CASE("an unknown command is bad_args, not a misleading target error") {
     // Regression: a typo'd command without --target fell through target
     // resolution first and reported no_target ("no --target and more than one

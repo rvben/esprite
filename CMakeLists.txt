@@ -1,9 +1,20 @@
 cmake_minimum_required(VERSION 3.20)
-project(esprite CXX C)
+project(esprite VERSION 0.1.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
+
+# Optimized by default; the Makefile's dev loop passes Debug explicitly.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+# Warnings for the sim's own code. Never applied to third-party builds (LVGL)
+# or to the read-only firmware sources compiled into <fw>_fw libraries.
+function(esprite_warnings target)
+    target_compile_options(${target} PRIVATE -Wall -Wextra)
+endfunction()
 
 # Read-only path to the Clawdmeter firmware source (first onboarded target).
 set(CLAWDMETER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../waveshare/Clawdmeter/firmware/src"
@@ -11,9 +22,10 @@ set(CLAWDMETER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../waveshare/Clawdmeter/firmware
 
 include(FetchContent)
 
-# Vendored single-header libraries.
+# Vendored single-header libraries. SYSTEM keeps -Wall/-Wextra scoped to the
+# sim's own code.
 add_library(third_party INTERFACE)
-target_include_directories(third_party INTERFACE
+target_include_directories(third_party SYSTEM INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 # Reusable Arduino + ESP-IDF shims (chip- and app-agnostic).
@@ -28,6 +40,7 @@ target_include_directories(shims PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/shims/esp
     ${CMAKE_CURRENT_SOURCE_DIR}/shims/net)
 target_link_libraries(shims PUBLIC third_party)
+esprite_warnings(shims)
 
 # Virtual peripherals (display framebuffer, PNG screenshot, injected input bus,
 # generic Arduino_GFX-to-framebuffer shim).
@@ -44,6 +57,7 @@ target_include_directories(peripherals PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/gfx
     ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/tft_espi)
 target_link_libraries(peripherals PUBLIC third_party)
+esprite_warnings(peripherals)
 
 # Core runtime + target registry.
 add_library(core STATIC
@@ -52,6 +66,7 @@ add_library(core STATIC
 )
 target_include_directories(core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core)
 target_link_libraries(core PUBLIC shims)
+esprite_warnings(core)
 
 # LVGL built from source with the sim lv_conf.h. Pinned to 9.5.0 to match the
 # version the Clawdmeter fonts were patched for (lv_font_t has static_bitmap).
@@ -85,6 +100,7 @@ add_library(lvgl_glue STATIC
     peripherals/lvgl/lvgl_snapshot.cpp)
 target_include_directories(lvgl_glue PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/lvgl)
 target_link_libraries(lvgl_glue PUBLIC lvgl peripherals)
+esprite_warnings(lvgl_glue)
 
 # ArduinoJson (used by the CLI scenario runner and by the clawdmeter target).
 FetchContent_Declare(ArduinoJson
@@ -173,6 +189,8 @@ endforeach()
 add_library(cli_lib STATIC cli/cli.cpp cli/scenario.cpp cli/actions.cpp)
 target_include_directories(cli_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/cli)
 target_link_libraries(cli_lib PUBLIC core peripherals lvgl_glue ArduinoJson)
+target_compile_definitions(cli_lib PRIVATE ESPRITE_VERSION="${PROJECT_VERSION}")
+esprite_warnings(cli_lib)
 if(SDL2_FOUND)
     target_link_libraries(cli_lib PUBLIC sim_window)   # propagates HAVE_SDL2
 endif()
@@ -180,6 +198,8 @@ endif()
 add_executable(esprite cli/main.cpp)
 target_link_libraries(esprite PRIVATE cli_lib)
 link_sim_targets(esprite)
+
+install(TARGETS esprite RUNTIME DESTINATION bin)
 
 # Unit-test executable. Grows as components are added.
 add_executable(sim_tests
