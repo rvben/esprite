@@ -62,18 +62,22 @@ void TFT_eSPI::putpx(int32_t x, int32_t y, uint16_t color) {
     if (_buf) {
         if (x < 0 || y < 0 || x >= _bw || y >= _bh) return;
         _buf[y * _bw + x] = color;
-    } else {
+    } else if (!_is_sprite) {
+        // Rotations 2 and 3 are the 180-degree mounts of 0 and 1: mirror both
+        // axes so a flipped sketch renders flipped, as on the real panel.
+        if (_rotation >= 2) { x = _w - 1 - x; y = _h - 1 - y; }
         Framebuffer& fb = sim_framebuffer();
         if (x < 0 || y < 0 || x >= fb.w() || y >= fb.h()) return;
         fb.data()[y * fb.w() + x] = color;
     }
+    // A sprite without a buffer draws nowhere.
 }
 
 void TFT_eSPI::drawPixel(int32_t x, int32_t y, uint16_t color) { putpx(x, y, color); }
 
 void TFT_eSPI::fillScreen(uint16_t color) {
-    if (_buf) std::fill(_buf, _buf + (size_t)_bw * _bh, color);
-    else      sim_framebuffer().fill(color);
+    if (_buf)             std::fill(_buf, _buf + (size_t)_bw * _bh, color);
+    else if (!_is_sprite) sim_framebuffer().fill(color);
 }
 
 void TFT_eSPI::drawFastHLine(int32_t x, int32_t y, int32_t w, uint16_t c) {
@@ -212,20 +216,32 @@ int16_t TFT_eSPI::drawRightString(const char* s, int32_t x, int32_t y, uint8_t) 
 uint8_t TFT_eSPI::getTouch(uint16_t* x, uint16_t* y, uint16_t) {
     int tx, ty;
     if (!sim_touch(&tx, &ty)) return 0;
+    // Taps are injected in framebuffer coordinates; report them in the
+    // sketch's logical coordinates, inverting the display's 180-degree flip.
+    if (_rotation >= 2) { tx = _w - 1 - tx; ty = _h - 1 - ty; }
     if (x) *x = (uint16_t)tx;
     if (y) *y = (uint16_t)ty;
     return 1;
 }
 
 // ---- Sprite ----
-TFT_eSprite::TFT_eSprite(TFT_eSPI* parent) : _parent(parent) {}
+TFT_eSprite::TFT_eSprite(TFT_eSPI* parent) : _parent(parent) { _is_sprite = true; }
 void* TFT_eSprite::createSprite(int16_t w, int16_t h) {
+    if (w <= 0 || h <= 0) return nullptr;
     _bw = w; _bh = h; _w = w; _h = h;
     _pixels.assign((size_t)w * h, 0);
     _buf = _pixels.data();
     return _buf;
 }
-void TFT_eSprite::deleteSprite() { _pixels.clear(); _buf = nullptr; _bw = _bh = 0; }
+void TFT_eSprite::deleteSprite() {
+    std::vector<uint16_t>().swap(_pixels);   // release the buffer's memory
+    _buf = nullptr;
+    _bw = _bh = 0;
+}
 void TFT_eSprite::pushSprite(int32_t x, int32_t y) {
-    if (_buf) sim_framebuffer().blit(x, y, _bw, _bh, _buf);
+    if (!_buf) return;
+    // Blit through the parent so a sprite parented to another sprite composes
+    // into that sprite's buffer, not straight onto the screen.
+    if (_parent) _parent->pushImage(x, y, _bw, _bh, _buf);
+    else         sim_framebuffer().blit(x, y, _bw, _bh, _buf);
 }

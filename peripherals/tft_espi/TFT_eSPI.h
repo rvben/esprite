@@ -72,6 +72,12 @@ public:
     void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t* data);
     static uint16_t color565(uint8_t r, uint8_t g, uint8_t b);
 
+    // Byte-order flag for pushImage data. The sim framebuffer is native RGB565
+    // either way (there is no SPI byte stream to model), so this only keeps
+    // sketches that call it compiling and queryable.
+    void setSwapBytes(bool swap) { _swap = swap; }
+    bool getSwapBytes() const { return _swap; }
+
     // Text.
     void setCursor(int32_t x, int32_t y);
     void setCursor(int32_t x, int32_t y, uint8_t font);
@@ -103,10 +109,14 @@ public:
 
 protected:
     // A draw target: the shared framebuffer (default) or a sprite's own buffer.
+    // A sprite whose buffer is absent (before createSprite / after
+    // deleteSprite) draws nowhere, like the real library.
     uint16_t* _buf = nullptr;      // null = draw to sim_framebuffer()
+    bool      _is_sprite = false;
     int16_t   _bw = 0, _bh = 0;    // sprite buffer dimensions
     int16_t   _w, _h;              // logical width/height (after rotation)
     uint8_t   _rotation = 0;
+    bool      _swap = false;
     int32_t   _cx = 0, _cy = 0;    // text cursor
     uint16_t  _fg = TFT_WHITE, _bg = TFT_BLACK;
     bool      _opaque = false;     // draw a text background

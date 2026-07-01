@@ -194,6 +194,7 @@ add_executable(sim_tests
     tests/test_target.cpp
     tests/test_lvgl_smoke.cpp
     tests/test_gfx.cpp
+    tests/test_tft_espi.cpp
     tests/test_cli.cpp
     tests/test_daemon.cpp
 )
