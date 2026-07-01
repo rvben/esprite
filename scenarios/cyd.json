@@ -1,0 +1,13 @@
+{
+  "target": "cyd",
+  "steps": [
+    { "cmd": "screenshot", "out": "cyd-01-blank.png" },
+    { "cmd": "tap", "x": 26,  "y": 17 },
+    { "cmd": "tap", "x": 90,  "y": 110 },
+    { "cmd": "tap", "x": 290, "y": 17 },
+    { "cmd": "tap", "x": 210, "y": 170 },
+    { "cmd": "tap", "x": 150, "y": 17 },
+    { "cmd": "tap", "x": 160, "y": 130 },
+    { "cmd": "screenshot", "out": "cyd-02-painted.png" }
+  ]
+}

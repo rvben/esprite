@@ -161,7 +161,7 @@ endforeach()
 
 # Onboarded targets: board variants (which run a shared firmware) and standalone
 # apps. Each provides its own CMakeLists via add_subdirectory.
-foreach(_t waveshare_amoled_216_c6 waveshare_amoled_18 sample_gfx)
+foreach(_t waveshare_amoled_216_c6 waveshare_amoled_18 sample_gfx cyd)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/targets/${_t}/CMakeLists.txt)
         add_subdirectory(targets/${_t})
     endif()
