@@ -39,6 +39,23 @@ firmware's own handler) and the real UI updates:
   --target clawdmeter --shot limits.png
 ```
 
+## Live window
+
+For an interactive, iOS-Simulator-style view, run `serve` with `--window`:
+
+```bash
+esp32sim serve --target clawdmeter --port 8080 --window
+```
+
+This opens a native SDL2 window that presents the device framebuffer live and
+lets you drive it: **mouse** = touch (click and drag), **space** = PRIMARY
+button, **tab** = SECONDARY, **p** = PWR, **Esc** = quit. Point a live bridge at
+the same port and the real data updates in the window in real time.
+
+The window is optional: it is only compiled when SDL2 is found at configure time
+(`brew install sdl2` on macOS). Without SDL2, everything else builds and runs
+headless, and `--window` prints a hint. `--scale N` enlarges the window N times.
+
 ## CLI
 
 ```
@@ -57,6 +74,8 @@ serial send 'TEXT'               feed the device serial input
 serial expect 'REGEX'            match against captured serial output
 logs                             print captured serial output
 scenario FILE.json               run a scripted scenario
+serve [--window] [--scale N]     boot and keep pumping for a live bridge; --window
+                                 opens an interactive SDL window (mouse/keys drive it)
 run                              daemon: newline-delimited JSON commands on stdin
 ```
 

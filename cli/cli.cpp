@@ -6,6 +6,9 @@
 #include "sim_input.h"
 #include "Print.h"
 #include "WebServer.h"
+#ifdef HAVE_SDL2
+#include "sim_window.h"
+#endif
 #include <ArduinoJson.h>
 #include <cstdio>
 #include <cstring>
@@ -33,7 +36,7 @@ static const char* kSchema = R"JSON({
     "serial":      { "args": ["send TEXT | expect REGEX"] },
     "logs":        {},
     "scenario":    { "args": ["file.json"] },
-    "serve":       { "opts": ["--port P", "--shot OUT", "--interval-ms N"], "desc": "boot and keep pumping so a live bridge can POST to the device" },
+    "serve":       { "opts": ["--port P", "--shot OUT", "--interval-ms N", "--window", "--scale N"], "desc": "boot and keep pumping so a live bridge can POST; --window opens a live SDL window (mouse=touch, space/tab/p=buttons)" },
     "run":         { "desc": "daemon: newline-delimited JSON commands on stdin" }
   }
 })JSON";
@@ -51,7 +54,7 @@ static bool opt_flag(int argc, char** argv, const char* name) {
 // Positional args after the command, skipping options and their values.
 static std::string positional(int argc, char** argv, int index) {
     static const char* val_opts[] = {"--target", "--steps", "--path", "--shot",
-                                     "--port", "--interval-ms"};
+                                     "--port", "--interval-ms", "--scale"};
     int seen = 0;
     for (int i = 2; i < argc; ++i) {
         bool is_opt = argv[i][0] == '-' && argv[i][1] == '-';
@@ -135,6 +138,23 @@ int esp32sim_main(int argc, char** argv) {
         }
         int interval = 1000;
         if (const char* iv = opt_val(argc, argv, "--interval-ms")) interval = atoi(iv);
+
+        bool want_window = opt_flag(argc, argv, "--window");
+#ifdef HAVE_SDL2
+        SimWindow* win = nullptr;
+        if (want_window) {
+            const SimTarget* at = sim_active_target();
+            int scale = 1;
+            if (const char* sc = opt_val(argc, argv, "--scale")) scale = atoi(sc);
+            win = sim_window_open(at->key, at->board->width, at->board->height, scale);
+            if (!win) fprintf(stderr, "serve: could not open a window; continuing headless\n");
+        }
+#else
+        if (want_window)
+            fprintf(stderr, "serve: built without SDL2; --window unavailable "
+                            "(install SDL2 and rebuild)\n");
+#endif
+
         fprintf(stderr, "esp32sim: serving '%s' at http://127.0.0.1:%s/snapshot%s\n",
                 t.c_str(), port ? port : "8080",
                 shot ? "" : " (pass --shot to capture frames)");
@@ -143,6 +163,14 @@ int esp32sim_main(int argc, char** argv) {
         auto last = std::chrono::steady_clock::now();
         for (;;) {
             sim_run_steps(4);              // pump handleClient() so POSTs land
+            bool paced = false;
+#ifdef HAVE_SDL2
+            if (win) {
+                if (!sim_window_tick(win)) break;   // window closed / Escape
+                paced = true;                        // vsync paces the frame
+            }
+#endif
+            if (!paced) std::this_thread::sleep_for(std::chrono::milliseconds(20));
             if (shot) {
                 auto now = std::chrono::steady_clock::now();
                 if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last).count() >= interval) {
@@ -150,8 +178,11 @@ int esp32sim_main(int argc, char** argv) {
                     last = now;
                 }
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
+#ifdef HAVE_SDL2
+        if (win) sim_window_close(win);
+#endif
+        return 0;
     }
 
     // Remaining commands boot a target first.

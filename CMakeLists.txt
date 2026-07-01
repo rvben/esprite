@@ -80,6 +80,26 @@ FetchContent_Declare(ArduinoJson
     GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(ArduinoJson)
 
+# Optional live device window (SDL2). Built only when SDL2 is present; headless
+# builds and CI are unaffected. The CLI guards --window on HAVE_SDL2.
+find_package(SDL2 QUIET)
+if(SDL2_FOUND)
+    add_library(sim_window STATIC peripherals/display/sim_window.cpp)
+    target_include_directories(sim_window PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/display)
+    target_link_libraries(sim_window PUBLIC peripherals)
+    if(TARGET SDL2::SDL2)
+        target_link_libraries(sim_window PUBLIC SDL2::SDL2)
+    else()
+        target_include_directories(sim_window PUBLIC ${SDL2_INCLUDE_DIRS})
+        target_link_libraries(sim_window PUBLIC ${SDL2_LIBRARIES})
+    endif()
+    target_compile_definitions(sim_window PUBLIC HAVE_SDL2)
+    message(STATUS "SDL2 ${SDL2_VERSION} found; live --window enabled")
+else()
+    message(STATUS "SDL2 not found; --window disabled (headless only)")
+endif()
+
 # Each onboarded target is a static library; a static initializer in its
 # board.cpp self-registers it. Force-load so the linker keeps that object even
 # though nothing references it directly.
@@ -115,6 +135,9 @@ endforeach()
 add_library(cli_lib STATIC cli/cli.cpp cli/scenario.cpp)
 target_include_directories(cli_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/cli)
 target_link_libraries(cli_lib PUBLIC core peripherals lvgl_glue ArduinoJson)
+if(SDL2_FOUND)
+    target_link_libraries(cli_lib PUBLIC sim_window)   # propagates HAVE_SDL2
+endif()
 
 add_executable(esp32sim cli/main.cpp)
 target_link_libraries(esp32sim PRIVATE cli_lib)
