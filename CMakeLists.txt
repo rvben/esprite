@@ -86,7 +86,8 @@ find_package(SDL2 QUIET)
 if(SDL2_FOUND)
     add_library(sim_window STATIC peripherals/display/sim_window.cpp)
     target_include_directories(sim_window PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/display)
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/display
+        ${CMAKE_CURRENT_SOURCE_DIR}/core)   # SimButton in target.h
     target_link_libraries(sim_window PUBLIC peripherals)
     if(TARGET SDL2::SDL2)
         target_link_libraries(sim_window PUBLIC SDL2::SDL2)

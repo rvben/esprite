@@ -7,7 +7,7 @@ static int g_loop_calls = 0;
 static void dummy_setup() { g_setup_calls++; }
 static void dummy_loop()  { g_loop_calls++; }
 
-static const BoardDesc kDummyBoard = {"Dummy", 240, 240, 1, false, false, false};
+static const BoardDesc kDummyBoard = {"Dummy", 240, 240, false, false, false, nullptr, 0};
 static const SimTarget kDummy = {"dummy", "test target", dummy_setup, dummy_loop, &kDummyBoard};
 
 TEST_CASE("target registry and runtime pump") {

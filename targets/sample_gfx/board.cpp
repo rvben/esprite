@@ -5,8 +5,11 @@
 void samplegfx_setup();
 void samplegfx_loop();
 
+// A bare sketch with no physical controls: the window shows just the screen.
 static const BoardDesc kBoard = {
-    "Generic GFX 320x240", 320, 240, 0, false, false, false
+    "Generic GFX 320x240", 320, 240,
+    false, false, false,   // has_rotation, has_battery, has_imu
+    nullptr, 0,            // no buttons
 };
 
 static const SimTarget kTarget = {

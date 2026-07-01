@@ -36,10 +36,16 @@ inline T constrain(T v, T lo, T hi) { return v < lo ? lo : (v > hi ? hi : v); }
 #define INPUT_PULLUP 2
 #define HIGH 1
 #define LOW 0
-inline void pinMode(int, int) {}
-inline void digitalWrite(int, int) {}
-inline int  digitalRead(int) { return 0; }
-inline int  analogRead(int) { return 0; }
+void pinMode(int pin, int mode);
+void digitalWrite(int pin, int level);
+int  digitalRead(int pin);
+inline int analogRead(int) { return 0; }
+
+// Injected GPIO state: the CLI and live window set levels here (a physical
+// button wired to a pin, or `esp32sim gpio PIN LEVEL`), and digitalRead reads
+// them, so standard-library sketches that poll pins work in the sim.
+int  sim_gpio_get(int pin);
+void sim_gpio_set(int pin, int level);
 
 // ---- Flash-string / PROGMEM no-ops -----------------------------------------
 #define F(x) (x)

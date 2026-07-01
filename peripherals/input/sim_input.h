@@ -17,8 +17,6 @@ struct SimInput {
     int  quadrant = 0;                 // 0..3 rotation
 
     std::deque<int> pwr_events;        // 1=press, 2=long, 3=release
-
-    int  gpio[64] = {0};               // generic pin levels for simple targets
 };
 
 SimInput& sim_input();

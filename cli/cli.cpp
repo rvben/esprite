@@ -146,7 +146,8 @@ int esp32sim_main(int argc, char** argv) {
             const SimTarget* at = sim_active_target();
             int scale = 1;
             if (const char* sc = opt_val(argc, argv, "--scale")) scale = atoi(sc);
-            win = sim_window_open(at->key, at->board->width, at->board->height, scale);
+            win = sim_window_open(at->key, at->board->width, at->board->height, scale,
+                                  at->board->buttons, at->board->button_count);
             if (!win) fprintf(stderr, "serve: could not open a window; continuing headless\n");
         }
 #else
@@ -243,7 +244,7 @@ int esp32sim_main(int argc, char** argv) {
     if (cmd == "gpio") {
         int pin = atoi(positional(argc, argv, 0).c_str());
         int lvl = atoi(positional(argc, argv, 1).c_str());
-        if (pin >= 0 && pin < 64) sim_input().gpio[pin] = lvl;
+        sim_gpio_set(pin, lvl);
         sim_run_steps(5);
         return 0;
     }
