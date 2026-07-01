@@ -35,7 +35,7 @@ struct BoardDesc {
 // app's Arduino entry points (or a thin wrapper). The registry is populated at
 // link time by each target's board.cpp via a static initializer.
 struct SimTarget {
-    const char*      key;          // e.g. "clawdmeter"
+    const char*      key;          // e.g. "waveshare_amoled_216_c6"
     const char*      description;
     void           (*setup)();
     void           (*loop)();

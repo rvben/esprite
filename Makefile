@@ -1,5 +1,5 @@
 BUILD  ?= build
-TARGET ?= clawdmeter
+TARGET ?= waveshare_amoled_216_c6
 
 .PHONY: configure build test screenshot scenario goldens clean
 

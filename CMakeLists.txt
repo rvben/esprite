@@ -124,6 +124,19 @@ function(add_sim_target name)
     set_property(GLOBAL APPEND PROPERTY SIM_TARGET_LIBS target_${name})
 endfunction()
 
+# A board variant reuses an already-built firmware library and only adds its own
+# board.cpp (board profile + registration). Multiple variants share one compiled
+# firmware, so boards of the same firmware (e.g. the 480x480 C6 and the 368x448
+# 1.8) coexist in the single multi-target binary. The board profile is selected
+# at runtime by board_caps() from the active target's BoardDesc.
+function(add_board_variant name fw)
+    # Called from targets/<board>/CMakeLists.txt, so board.cpp resolves against
+    # that board's source dir.
+    add_library(target_${name} STATIC ${CMAKE_CURRENT_SOURCE_DIR}/board.cpp)
+    target_link_libraries(target_${name} PUBLIC ${fw})
+    set_property(GLOBAL APPEND PROPERTY SIM_TARGET_LIBS target_${name})
+endfunction()
+
 function(link_sim_targets exe)
     get_property(_libs GLOBAL PROPERTY SIM_TARGET_LIBS)
     foreach(_lib ${_libs})
@@ -138,8 +151,17 @@ function(link_sim_targets exe)
     endforeach()
 endfunction()
 
-# Onboarded targets (each provides its own CMakeLists via add_subdirectory).
-foreach(_t clawdmeter sample_gfx)
+# Shared firmwares, compiled once (a firmware is board-agnostic; board targets
+# below select the panel). Added before the board targets that reference them.
+foreach(_fw clawdmeter)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/firmwares/${_fw}/CMakeLists.txt)
+        add_subdirectory(firmwares/${_fw})
+    endif()
+endforeach()
+
+# Onboarded targets: board variants (which run a shared firmware) and standalone
+# apps. Each provides its own CMakeLists via add_subdirectory.
+foreach(_t waveshare_amoled_216_c6 waveshare_amoled_18 sample_gfx)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/targets/${_t}/CMakeLists.txt)
         add_subdirectory(targets/${_t})
     endif()
@@ -181,10 +203,10 @@ add_executable(sim_itests
     tests/itest_main.cpp
     tests/itest_sample_gfx.cpp
 )
-# The clawdmeter target is only registered when its firmware source is present
-# (see targets/clawdmeter/CMakeLists.txt). Only then compile its integration
-# test, so a clean checkout without the firmware still passes `make test`.
-if(TARGET target_clawdmeter)
+# The Clawdmeter firmware is only built when its source is present (see
+# firmwares/clawdmeter/CMakeLists.txt). Only then compile the integration test
+# that boots it, so a clean checkout without the firmware still passes `make test`.
+if(TARGET clawdmeter_fw)
     target_sources(sim_itests PRIVATE tests/itest_clawdmeter.cpp)
 endif()
 target_link_libraries(sim_itests PRIVATE cli_lib)

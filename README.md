@@ -5,19 +5,21 @@ source** on your machine, renders the device display into an offscreen
 framebuffer, and drives it with an agent-device-style CLI: screenshots, input
 injection (GPIO, buttons, touch), serial, and scripted scenarios.
 
-It is a reusable tool, not tied to any one app. The first onboarded target is the
-Clawdmeter `waveshare_amoled_216_c6_wifi` firmware (a board that cannot even
-screenshot on real hardware, since it has no PSRAM). A second target, a minimal
-generic Arduino_GFX sketch, ships to show the framework runs standard-library
-apps with zero app-specific code.
+It is a reusable tool, not tied to any one app. A **firmware** is compiled once
+and is board-agnostic (it renders itself from `board_caps()` at runtime); a
+**board** target selects the panel it runs on. The first onboarded firmware is
+Clawdmeter, shown here on two Waveshare boards - `waveshare_amoled_216_c6`
+(480x480) and `waveshare_amoled_18` (368x448) - from one compilation. A third
+target, `sample_gfx`, is a minimal generic Arduino_GFX sketch that shows the
+framework runs standard-library apps with zero app-specific code.
 
 ## Quick start
 
 ```bash
 make build
 ./build/esprite list-targets
-make screenshot TARGET=clawdmeter     # writes clawdmeter.png
-make screenshot TARGET=sample_gfx     # writes sample_gfx.png
+make screenshot TARGET=waveshare_amoled_216_c6   # writes waveshare_amoled_216_c6.png
+make screenshot TARGET=sample_gfx                # writes sample_gfx.png
 make test                             # unit + integration tests
 ```
 
@@ -34,7 +36,7 @@ firmware's own handler) and the real UI updates:
 ```bash
 ./build/esprite snapshot \
   '{"lim":1,"s5":42,"s5r":180,"s7":10,"s7r":6000,"ctx":55,"cost":1.5,"model":"opus"}' \
-  --target clawdmeter --shot limits.png
+  --target waveshare_amoled_216_c6 --shot limits.png
 ```
 
 ## Live window
@@ -42,7 +44,7 @@ firmware's own handler) and the real UI updates:
 For an interactive, iOS-Simulator-style view, run `serve` with `--window`:
 
 ```bash
-esprite serve --target clawdmeter --port 8080 --window
+esprite serve --target waveshare_amoled_216_c6 --port 8080 --window
 ```
 
 This opens a native SDL2 window that presents the device framebuffer live and
@@ -81,7 +83,7 @@ Scenarios are ordered JSON steps, useful in CI:
 
 ```json
 {
-  "target": "clawdmeter",
+  "target": "waveshare_amoled_216_c6",
   "steps": [
     { "cmd": "screenshot", "out": "01-waiting.png" },
     { "cmd": "snapshot", "data": {"lim":1,"s5":42,"s7":10,"ctx":55,"cost":1.5,"model":"opus"} },
@@ -99,9 +101,9 @@ stderr.
 For LVGL targets there is a **snapshot-ref model** like a browser page snapshot:
 
 ```bash
-esprite ui --target clawdmeter
+esprite ui --target waveshare_amoled_216_c6
 # [{"ref":"e6","type":"bar","x":36,"y":168,"w":408,"h":24,"value":42}, ...]
-esprite tap --ref e6 --target clawdmeter     # tap that widget, not a pixel
+esprite tap --ref e6 --target waveshare_amoled_216_c6     # tap that widget, not a pixel
 ```
 
 `ui` returns the live widget tree (refs, type, coords, text, bar/arc values), so
@@ -112,7 +114,7 @@ The `run` daemon is a persistent session where refs from `ui` stay valid across
 the session:
 
 ```
-{"cmd":"boot","target":"clawdmeter"}
+{"cmd":"boot","target":"waveshare_amoled_216_c6"}
 {"cmd":"snapshot","data":{"lim":1,"s5":42,"s7":10,"ctx":55,"cost":1.5,"model":"opus"}}
 {"cmd":"ui"}                              # read the updated tree, get refs
 {"cmd":"tap","ref":"e6"}                  # act on a ref

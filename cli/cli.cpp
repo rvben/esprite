@@ -49,7 +49,7 @@ static const char* kSchema = R"JSON({
         { "name": "rotation", "description": "Board supports rotation.", "type": "boolean" }
       ] },
     { "name": "ui", "description": "Snapshot the active LVGL widget tree as an array of elements; act on the refs with 'tap --ref'. Empty for non-LVGL targets.", "mutating": false, "stability": "stable",
-      "example": { "args": ["--target", "clawdmeter"], "stdin": "" },
+      "example": { "args": ["--target", "waveshare_amoled_216_c6"], "stdin": "" },
       "output_fields": [
         { "name": "ref", "description": "Stable element handle, e.g. e3.", "type": "string" },
         { "name": "type", "description": "label|bar|arc|button|image|line|obj.", "type": "string" },
@@ -60,7 +60,7 @@ static const char* kSchema = R"JSON({
       ] },
     { "name": "screenshot", "description": "Boot, render, and write a PNG of the device screen.", "mutating": false, "stability": "stable",
       "args": [ { "name": "out", "description": "Output PNG path (default esprite.png).", "type": "string", "required": false } ],
-      "example": { "args": ["out.png", "--target", "clawdmeter"], "stdin": "" },
+      "example": { "args": ["out.png", "--target", "waveshare_amoled_216_c6"], "stdin": "" },
       "output_fields": [
         { "name": "ok", "description": "Wrote the file.", "type": "boolean" },
         { "name": "path", "description": "PNG path.", "type": "string" },
@@ -69,13 +69,13 @@ static const char* kSchema = R"JSON({
       ] },
     { "name": "snapshot", "description": "POST a JSON body to the device's /snapshot HTTP endpoint (data the firmware parses).", "mutating": true, "stability": "stable",
       "args": [ { "name": "json", "description": "Wire JSON to POST.", "type": "string", "required": true } ],
-      "example": { "args": ["{\"lim\":1,\"s5\":42}", "--target", "clawdmeter"], "stdin": "" } },
+      "example": { "args": ["{\"lim\":1,\"s5\":42}", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
     { "name": "tap", "description": "Inject a touch, by widget ref (--ref e3, from ui) or by pixel (x y).", "mutating": true, "stability": "stable",
       "args": [
         { "name": "x", "description": "X pixel (omit when using --ref).", "type": "number", "required": false },
         { "name": "y", "description": "Y pixel.", "type": "number", "required": false }
       ],
-      "example": { "args": ["240", "240", "--target", "clawdmeter"], "stdin": "" },
+      "example": { "args": ["240", "240", "--target", "waveshare_amoled_216_c6"], "stdin": "" },
       "output_fields": [
         { "name": "ok", "description": "Tap injected.", "type": "boolean" },
         { "name": "x", "description": "Resolved x.", "type": "number" },
@@ -83,27 +83,27 @@ static const char* kSchema = R"JSON({
       ] },
     { "name": "button", "description": "Press a physical button.", "mutating": true, "stability": "stable",
       "args": [ { "name": "which", "description": "Button to press.", "type": "string", "required": true, "enum": ["primary", "secondary", "pwr"] } ],
-      "example": { "args": ["primary", "--target", "clawdmeter"], "stdin": "" } },
+      "example": { "args": ["primary", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
     { "name": "battery", "description": "Set battery level; --charging and --no-vbus set the flags.", "mutating": true, "stability": "stable",
       "args": [ { "name": "pct", "description": "0-100.", "type": "number", "required": true } ],
-      "example": { "args": ["50", "--target", "clawdmeter"], "stdin": "" } },
+      "example": { "args": ["50", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
     { "name": "rotate", "description": "Set the IMU rotation quadrant (0-3).", "mutating": true, "stability": "stable",
       "args": [ { "name": "quadrant", "description": "0-3.", "type": "number", "required": true } ],
-      "example": { "args": ["1", "--target", "clawdmeter"], "stdin": "" } },
+      "example": { "args": ["1", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
     { "name": "gpio", "description": "Set a GPIO pin level (read back by digitalRead).", "mutating": true, "stability": "stable",
       "args": [
         { "name": "pin", "description": "GPIO number.", "type": "number", "required": true },
         { "name": "level", "description": "0 or 1.", "type": "number", "required": true }
       ],
-      "example": { "args": ["9", "1", "--target", "clawdmeter"], "stdin": "" } },
+      "example": { "args": ["9", "1", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
     { "name": "serial", "description": "serial send TEXT feeds device input; serial expect REGEX matches captured output (exit 1 on no match).", "mutating": false, "stability": "stable",
       "args": [
         { "name": "sub", "description": "send or expect.", "type": "string", "required": true, "enum": ["send", "expect"] },
         { "name": "arg", "description": "Text to send, or regex to expect.", "type": "string", "required": true }
       ],
-      "example": { "args": ["expect", "ready", "--target", "clawdmeter"], "stdin": "" } },
+      "example": { "args": ["expect", "ready", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
     { "name": "logs", "description": "Print captured device serial output.", "mutating": false, "stability": "stable",
-      "example": { "args": ["--target", "clawdmeter"], "stdin": "" },
+      "example": { "args": ["--target", "waveshare_amoled_216_c6"], "stdin": "" },
       "output_fields": [ { "name": "serial", "description": "Captured serial text.", "type": "string" } ] },
     { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless.", "mutating": true, "stability": "stable",
       "args": [ { "name": "file", "description": "Scenario JSON path.", "type": "string", "required": true } ] },
@@ -298,7 +298,7 @@ int esprite_main(int argc, char** argv) {
         std::string file = positional(argc, argv, 0);
         if (file.empty()) return fail("bad_args", "scenario needs a file path", 2);
         std::string def = resolve_target(argc, argv);
-        return scenario_run(file, def.empty() ? "clawdmeter" : def);
+        return scenario_run(file, def.empty() ? "waveshare_amoled_216_c6" : def);
     }
 
     if (cmd == "serve") {

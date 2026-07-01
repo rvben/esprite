@@ -1,8 +1,9 @@
 #include "target.h"
 
-// Firmware entry points from Clawdmeter's main.cpp, renamed at compile time
-// (setup->clawdmeter_setup, loop->clawdmeter_loop) so multiple targets can
-// coexist in one binary. See this target's CMakeLists.txt.
+// The Waveshare AMOLED 2.16 C6 board. It boots the shared Clawdmeter firmware
+// (clawdmeter_fw); this file only describes the hardware. The firmware's entry
+// points are renamed at compile time (setup->clawdmeter_setup) so it coexists
+// with other firmwares (e.g. sample_gfx) in one binary.
 void clawdmeter_setup();
 void clawdmeter_loop();
 
@@ -20,8 +21,8 @@ static const BoardDesc kBoard = {
 };
 
 static const SimTarget kTarget = {
-    "clawdmeter",
-    "Waveshare ESP32-C6 AMOLED 2.16 (Wi-Fi limits)",
+    "waveshare_amoled_216_c6",
+    "Waveshare ESP32-C6 AMOLED 2.16 running Clawdmeter",
     clawdmeter_setup,
     clawdmeter_loop,
     &kBoard,

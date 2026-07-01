@@ -12,8 +12,9 @@
 #include <cstdio>
 #include <string>
 
-// Integration test for the clawdmeter target. Isolated in its own executable so
-// LVGL global state is clean (no prior lv_init from unit tests).
+// Integration test for the Clawdmeter firmware on the Waveshare AMOLED 2.16 C6
+// board. Isolated in its own executable so LVGL global state is clean (no prior
+// lv_init from unit tests).
 
 int sim_http_bind_status();   // shims/net/WebServer.h: >0 = the port the target bound
 
@@ -63,13 +64,13 @@ static std::string multipart(const std::string& boundary, const std::string& fil
            "--" + boundary + "--\r\n";
 }
 
-TEST_CASE("clawdmeter boots, renders, serves snapshots, and gates OTA /update") {
+TEST_CASE("waveshare_amoled_216_c6 boots, renders, serves snapshots, and gates OTA /update") {
     // Bind an ephemeral port so a leftover listener can never collide with a
     // fixed one; sim_wifi_post and the OTA sockets both use the bound port.
     setenv("ESPRITE_HTTP_PORT", "0", 1);
     sim_serial_clear();
 
-    REQUIRE(sim_boot("clawdmeter"));
+    REQUIRE(sim_boot("waveshare_amoled_216_c6"));
     sim_run_steps(60);
 
     // The firmware prints its ready banner once LVGL and the transport are up.
