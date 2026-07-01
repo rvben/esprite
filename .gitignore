@@ -10,3 +10,7 @@ CMakeFiles/
 CLAUDE.md
 CLAUDE.local.md
 .claude/
+
+# Internal planning specs (not for the public repo)
+docs/plans/
+docs/specs/
