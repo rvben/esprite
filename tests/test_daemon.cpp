@@ -51,6 +51,11 @@ TEST_CASE("run session: an oversized line yields one error reply, not a desync")
     CHECK(out.find("line too long") != std::string::npos);
 }
 
+TEST_CASE("run session: commands before boot reply not_booted") {
+    std::string out = run_daemon("{\"cmd\":\"ui\"}\n");
+    CHECK(out.find("\"kind\":\"not_booted\"") != std::string::npos);
+}
+
 TEST_CASE("run session: a second boot is rejected, not silently corrupting") {
     // Regression: re-booting re-ran the firmware's setup() (for LVGL targets
     // duplicating the whole widget tree; lv_init cannot run twice per process).

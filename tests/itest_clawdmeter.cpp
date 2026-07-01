@@ -4,6 +4,7 @@
 #include "scenario.h"
 #include "framebuffer.h"
 #include "Print.h"
+#include "Arduino.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
@@ -29,8 +30,10 @@ static uint32_t fb_hash() {
 // Send a raw HTTP request to the booted target's webserver and return the
 // response status code. The sim webserver is single-threaded, so the sequence
 // is: send the whole request, half-close (so the server sees EOF and processes
-// it), pump loop() a few times to run handleClient(), then read the buffered
-// response. Returns -1 if the request could not be delivered.
+// it), then alternate pumping loop() with a bounded recv until the buffered
+// response arrives. A single fixed pump followed by a blocking recv once hung
+// the suite when the accept raced the pump under load. Returns -1 if the
+// request could not be delivered.
 static int http_status(int port, const std::string& req) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in a{};
@@ -45,9 +48,14 @@ static int http_status(int port, const std::string& req) {
         off += (size_t)n;
     }
     shutdown(fd, SHUT_WR);
-    sim_run_steps(8);   // pump handleClient() so the server processes + responds
+    timeval tv{0, 100000};   // 100 ms per recv attempt
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     char buf[4096];
-    ssize_t n = recv(fd, buf, sizeof(buf) - 1, 0);
+    ssize_t n = -1;
+    for (int attempt = 0; attempt < 20 && n <= 0; ++attempt) {
+        sim_run_steps(8);   // pump handleClient() so the server processes + responds
+        n = recv(fd, buf, sizeof(buf) - 1, 0);
+    }
     close(fd);
     if (n <= 0) return -1;
     buf[n] = 0;
@@ -112,6 +120,11 @@ TEST_CASE("waveshare_amoled_216_c6 boots, renders, serves snapshots, and gates O
 
     // 3) Authorized with a firmware file: reaches the success/reboot path. Run
     //    last, as the firmware requests a (simulated) restart afterwards.
+    CHECK_FALSE(sim_esp_restart_requested());
     CHECK(http_status(port,
         "POST /update HTTP/1.1\r\nHost: x\r\nX-Clawdmeter: 1\r\n" + mp_headers + body) == 200);
+    // The reboot is deferred (the firmware flushes the 200 first, then acts
+    // after its 1 s action delay); settle past that window and it must fire.
+    sim_settle_ms(1500, 1000);
+    CHECK(sim_esp_restart_requested());
 }

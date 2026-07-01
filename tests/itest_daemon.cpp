@@ -44,13 +44,21 @@ TEST_CASE("run session: injected snapshot data is rendered, not just applied to 
     // screen's pixels because too few loop steps ran for an LVGL refresh.
     setenv("ESPRITE_HTTP_PORT", "0", 1);
 
+    // One session, one boot (lv_init runs once per process). The unknown-ref
+    // tap and the explicit steps command are side-effect-free (no input lands,
+    // no view changes), so the painted-bars assertion below stays valid.
     std::string out = run_daemon(
         "{\"cmd\":\"boot\",\"target\":\"waveshare_amoled_216_c6\"}\n"
         "{\"cmd\":\"snapshot\",\"data\":{\"lim\":1,\"s5\":42,\"s5r\":180,"
         "\"s7\":10,\"s7r\":6000,\"ctx\":55,\"cost\":1.5,\"model\":\"opus\"}}\n"
         "{\"cmd\":\"ui\"}\n"
+        "{\"cmd\":\"tap\",\"ref\":\"e999\"}\n"
+        "{\"cmd\":\"steps\",\"n\":25}\n"
         "{\"cmd\":\"quit\"}\n");
     unsetenv("ESPRITE_HTTP_PORT");
+
+    // Refs resolve against the session's ui snapshot: a bogus ref is rejected.
+    CHECK(out.find("\"kind\":\"ref_not_found\"") != std::string::npos);
 
     // Pull the ui reply (the line that is a JSON array) and find the bars the
     // firmware reports for the injected 42% / 10% limits.
@@ -73,3 +81,4 @@ TEST_CASE("run session: injected snapshot data is rendered, not just applied to 
         CHECK(distinct_colors(x, y, w, h) >= 2);
     }
 }
+

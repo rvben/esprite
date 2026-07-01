@@ -209,6 +209,7 @@ add_executable(sim_tests
     tests/test_heapcaps.cpp
     tests/test_prefs.cpp
     tests/test_webserver.cpp
+    tests/test_wifimanager.cpp
     tests/test_framebuffer.cpp
     tests/test_screenshot.cpp
     tests/test_target.cpp
@@ -249,6 +250,16 @@ if(TARGET clawdmeter_fw)
     add_executable(sim_itests_daemon tests/itest_main.cpp tests/itest_daemon.cpp)
     target_link_libraries(sim_itests_daemon PRIVATE cli_lib)
     link_sim_targets(sim_itests_daemon)
+
+    # Scenario runner end to end through esprite_main (boots the LVGL firmware).
+    add_executable(sim_itests_scenario tests/itest_main.cpp tests/itest_scenario.cpp)
+    target_link_libraries(sim_itests_scenario PRIVATE cli_lib)
+    link_sim_targets(sim_itests_scenario)
+
+    # One-shot ui + bounded-array slicing over a live widget tree.
+    add_executable(sim_itests_ui tests/itest_main.cpp tests/itest_ui.cpp)
+    target_link_libraries(sim_itests_ui PRIVATE cli_lib)
+    link_sim_targets(sim_itests_ui)
 endif()
 
 enable_testing()
@@ -259,4 +270,6 @@ if(TARGET sim_itests_amoled18)
 endif()
 if(TARGET sim_itests_daemon)
     add_test(NAME sim_itests_daemon COMMAND sim_itests_daemon)
+    add_test(NAME sim_itests_scenario COMMAND sim_itests_scenario)
+    add_test(NAME sim_itests_ui COMMAND sim_itests_ui)
 endif()

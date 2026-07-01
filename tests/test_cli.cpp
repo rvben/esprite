@@ -1,42 +1,8 @@
-#include "doctest.h"
-#include "cli.h"
-#include <vector>
-#include <string>
-#include <initializer_list>
-#include <cstdio>
+#include "cli_test_helpers.h"
+#include "Arduino.h"
 #include <sys/stat.h>
-#include <unistd.h>
-
-static int run_cli(std::initializer_list<const char*> args) {
-    std::vector<char*> argv;
-    static std::vector<std::string> storage;
-    storage.clear();
-    for (auto* a : args) storage.emplace_back(a);
-    for (auto& s : storage) argv.push_back(const_cast<char*>(s.c_str()));
-    return esprite_main((int)argv.size(), argv.data());
-}
 
 static bool file_exists(const char* p) { struct stat st; return stat(p, &st) == 0; }
-
-// Like run_cli, but also captures what the command wrote to stderr (the error
-// envelope), so tests can assert the error *kind*, not just the exit code.
-static int run_cli_err(std::initializer_list<const char*> args, std::string* err) {
-    fflush(stderr);
-    int saved = dup(fileno(stderr));
-    FILE* tmp = tmpfile();
-    REQUIRE(tmp != nullptr);
-    dup2(fileno(tmp), fileno(stderr));
-    int rc = run_cli(args);
-    fflush(stderr);
-    dup2(saved, fileno(stderr));
-    close(saved);
-    rewind(tmp);
-    char buf[4096];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, tmp);
-    fclose(tmp);
-    err->assign(buf, n);
-    return rc;
-}
 
 TEST_CASE("schema, help, and list-targets succeed without a booted target") {
     CHECK(run_cli({"esprite", "schema"}) == 0);
@@ -56,23 +22,43 @@ TEST_CASE("commands reject capabilities the active board lacks") {
     CHECK(run_cli({"esprite", "button", "primary", "--target", "sample_gfx"}) == 7);
 }
 
-// Like run_cli_err, but captures stdout (the result payload).
-static int run_cli_out(std::initializer_list<const char*> args, std::string* out) {
-    fflush(stdout);
-    int saved = dup(fileno(stdout));
-    FILE* tmp = tmpfile();
-    REQUIRE(tmp != nullptr);
-    dup2(fileno(tmp), fileno(stdout));
-    int rc = run_cli(args);
-    fflush(stdout);
-    dup2(saved, fileno(stdout));
-    close(saved);
-    rewind(tmp);
-    char buf[65536];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, tmp);
-    fclose(tmp);
-    out->assign(buf, n);
-    return rc;
+TEST_CASE("every documented error kind fires with its schema exit code") {
+    std::string err;
+
+    CHECK(run_cli_err({"esprite", "screenshot", "x.png", "--target", "nope"}, &err) == 2);
+    CHECK(err.find("\"kind\":\"unknown_target\"") != std::string::npos);
+
+    // Five targets registered: booting without --target cannot resolve.
+    CHECK(run_cli_err({"esprite", "logs"}, &err) == 2);
+    CHECK(err.find("\"kind\":\"no_target\"") != std::string::npos);
+
+    CHECK(run_cli_err({"esprite", "tap", "--ref", "e99", "--target", "cyd"}, &err) == 4);
+    CHECK(err.find("\"kind\":\"ref_not_found\"") != std::string::npos);
+
+    CHECK(run_cli_err({"esprite", "tap", "--ref", "e1", "5", "5", "--target", "cyd"}, &err) == 5);
+    CHECK(err.find("\"kind\":\"conflict\"") != std::string::npos);
+
+    // sample_gfx runs no HTTP server, so a snapshot has nowhere to land.
+    CHECK(run_cli_err({"esprite", "snapshot", "{\"a\":1}", "--target", "sample_gfx"}, &err) == 6);
+    CHECK(err.find("\"kind\":\"post_failed\"") != std::string::npos);
+
+    CHECK(run_cli_err({"esprite", "battery", "50", "--target", "sample_gfx"}, &err) == 7);
+    CHECK(err.find("\"kind\":\"unsupported\"") != std::string::npos);
+}
+
+TEST_CASE("gpio injection is readable through the Arduino API after the command") {
+    CHECK(run_cli({"esprite", "gpio", "5", "1", "--target", "cyd"}) == 0);
+    CHECK(digitalRead(5) == 1);
+    CHECK(run_cli({"esprite", "gpio", "5", "0", "--target", "cyd"}) == 0);
+    CHECK(digitalRead(5) == 0);
+}
+
+TEST_CASE("ui on a non-LVGL target returns an empty bounded envelope") {
+    std::string out;
+    CHECK(run_cli_out({"esprite", "ui", "--target", "cyd"}, &out) == 0);
+    CHECK(out.find("\"items\":[]") != std::string::npos);
+    CHECK(out.find("\"total\":0") != std::string::npos);
+    CHECK(out.find("\"truncated\":false") != std::string::npos);
 }
 
 TEST_CASE("--version prints the tool name and version") {
