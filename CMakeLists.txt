@@ -16,11 +16,29 @@ add_library(third_party INTERFACE)
 target_include_directories(third_party INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
-# Unit-test executable. Grows as components are added; Phase A is the smoke test.
+# Reusable Arduino + ESP-IDF shims (chip- and app-agnostic).
+add_library(shims STATIC
+    shims/arduino/arduino_clock.cpp
+    shims/arduino/serial.cpp
+    shims/esp/preferences.cpp
+    shims/net/webserver.cpp
+)
+target_include_directories(shims PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/shims/arduino
+    ${CMAKE_CURRENT_SOURCE_DIR}/shims/esp
+    ${CMAKE_CURRENT_SOURCE_DIR}/shims/net)
+target_link_libraries(shims PUBLIC third_party)
+
+# Unit-test executable. Grows as components are added.
 add_executable(sim_tests
     tests/test_smoke.cpp
+    tests/test_arduino.cpp
+    tests/test_serial.cpp
+    tests/test_heapcaps.cpp
+    tests/test_prefs.cpp
+    tests/test_webserver.cpp
 )
-target_link_libraries(sim_tests PRIVATE third_party)
+target_link_libraries(sim_tests PRIVATE third_party shims)
 
 enable_testing()
 add_test(NAME sim_tests COMMAND sim_tests)
