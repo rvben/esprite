@@ -69,7 +69,9 @@ list(FILTER _lvgl_srcs EXCLUDE REGEX "\\.S$")
 set_target_properties(lvgl PROPERTIES SOURCES "${_lvgl_srcs}")
 
 # LVGL-to-framebuffer glue for LVGL-based targets.
-add_library(lvgl_glue STATIC peripherals/lvgl/lvgl_display.cpp)
+add_library(lvgl_glue STATIC
+    peripherals/lvgl/lvgl_display.cpp
+    peripherals/lvgl/lvgl_snapshot.cpp)
 target_include_directories(lvgl_glue PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/lvgl)
 target_link_libraries(lvgl_glue PUBLIC lvgl peripherals)
 
