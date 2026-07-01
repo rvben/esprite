@@ -11,8 +11,6 @@ screenshot on real hardware, since it has no PSRAM). A second target, a minimal
 generic Arduino_GFX sketch, ships to show the framework runs standard-library
 apps with zero app-specific code.
 
-> Working name; will be renamed before any release.
-
 ## Quick start
 
 ```bash
