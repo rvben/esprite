@@ -9,5 +9,10 @@
 std::string lvgl_snapshot_json();
 
 // Resolve a ref (e.g. "e3") to the center of its widget in device coordinates,
-// suitable for a touch. Returns false if the ref is not in the current tree.
+// suitable for a touch. Uses the refs from the last lvgl_snapshot_json() (taking
+// one if none exists yet), so a ref stays valid until the next snapshot even if
+// the tree changes. Returns false if the ref is not in that snapshot.
 bool lvgl_ref_center(const std::string& ref, int* x, int* y);
+
+// Clear the stored refs (call on boot so a new target starts clean).
+void lvgl_snapshot_reset();

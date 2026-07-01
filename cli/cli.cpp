@@ -161,7 +161,7 @@ static int boot_or_die(int argc, char** argv) {
         return fail("no_target", "no --target and more than one target registered", 2);
     if (!sim_boot(t))
         return fail("unknown_target", "unknown target '" + t + "'", 2);
-    sim_run_steps(WARMUP_STEPS);
+    sim_run_steps(WARMUP_STEPS);   // sim_boot resets UI refs via its boot hook
     return 0;
 }
 
@@ -484,7 +484,7 @@ static int cmd_daemon() {
         if (cmd == "boot") {
             std::string t = doc["target"] | "";
             booted = sim_boot(t);
-            if (booted) sim_run_steps(WARMUP_STEPS);
+            if (booted) sim_run_steps(WARMUP_STEPS);   // sim_boot resets UI refs
             printf("{\"ok\":%s}\n", jbool(booted));
         } else if (!booted) {
             printf("{\"error\":\"not_booted\"}\n");

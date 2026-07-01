@@ -1,8 +1,16 @@
 #include "lvgl_snapshot.h"
 #include "lvgl.h"
+#include "framebuffer.h"
 #include <functional>
 #include <string>
+#include <map>
+#include <utility>
 #include <cstdio>
+
+// Refs from the most recent snapshot -> widget center, so tap --ref uses the
+// coordinates as of that snapshot (the agent-browser contract) even if the tree
+// changes afterwards. Cleared on boot via lvgl_snapshot_reset().
+static std::map<std::string, std::pair<int, int>> g_refs;
 
 static const char* type_name(lv_obj_t* o) {
     if (lv_obj_check_type(o, &lv_label_class))  return "label";
@@ -42,8 +50,22 @@ static void json_escape(std::string& out, const char* s) {
     }
 }
 
+// The active LVGL screen for the current target, or null. Guards against a stale
+// tree left in LVGL's global state by a previously-booted target: if the active
+// display's resolution no longer matches the current framebuffer, this target
+// does not own the LVGL screen (e.g. a non-LVGL target booted after an LVGL one).
+static lv_obj_t* current_screen() {
+    lv_display_t* disp = lv_display_get_default();
+    if (!disp) return nullptr;
+    if ((int)lv_display_get_horizontal_resolution(disp) != sim_framebuffer().w() ||
+        (int)lv_display_get_vertical_resolution(disp)   != sim_framebuffer().h())
+        return nullptr;
+    return lv_screen_active();
+}
+
 std::string lvgl_snapshot_json() {
-    lv_obj_t* scr = lv_screen_active();
+    g_refs.clear();
+    lv_obj_t* scr = current_screen();
     std::string out = "[";
     if (scr) {
         int counter = 0;
@@ -51,6 +73,7 @@ std::string lvgl_snapshot_json() {
         walk(scr, counter, [&](int ref, lv_obj_t* o) {
             lv_area_t a;
             lv_obj_get_coords(o, &a);
+            g_refs["e" + std::to_string(ref)] = { (a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2 };
             if (!first) out += ",";
             first = false;
             out += "{\"ref\":\"e" + std::to_string(ref) + "\",\"type\":\"" + type_name(o) + "\"";
@@ -74,19 +97,19 @@ std::string lvgl_snapshot_json() {
 }
 
 bool lvgl_ref_center(const std::string& ref, int* x, int* y) {
-    lv_obj_t* scr = lv_screen_active();
-    if (!scr) return false;
-    int counter = 0;
-    bool found = false;
-    walk(scr, counter, [&](int r, lv_obj_t* o) {
-        if (found) return;
-        if (("e" + std::to_string(r)) == ref) {
-            lv_area_t a;
-            lv_obj_get_coords(o, &a);
-            *x = (a.x1 + a.x2) / 2;
-            *y = (a.y1 + a.y2) / 2;
-            found = true;
-        }
-    });
-    return found;
+    // Resolve against the last snapshot's refs. If none was taken this session
+    // (e.g. a one-shot `tap --ref`), snapshot the current tree first.
+    if (g_refs.empty()) lvgl_snapshot_json();
+    auto it = g_refs.find(ref);
+    if (it == g_refs.end()) return false;
+    *x = it->second.first;
+    *y = it->second.second;
+    return true;
 }
+
+void lvgl_snapshot_reset() { g_refs.clear(); }
+
+// Reset the ref map on every boot via the common runtime hook, so refs never
+// leak across a re-boot regardless of the caller.
+extern void sim_on_boot(void (*)());   // core/runtime
+namespace { struct BootReg { BootReg() { sim_on_boot(lvgl_snapshot_reset); } } g_boot_reg; }
