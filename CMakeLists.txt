@@ -135,9 +135,15 @@ link_sim_targets(sim_tests)
 # Integration tests that boot real targets, isolated from unit tests so LVGL
 # global state stays clean.
 add_executable(sim_itests
-    tests/itest_clawdmeter.cpp
+    tests/itest_main.cpp
     tests/itest_sample_gfx.cpp
 )
+# The clawdmeter target is only registered when its firmware source is present
+# (see targets/clawdmeter/CMakeLists.txt). Only then compile its integration
+# test, so a clean checkout without the firmware still passes `make test`.
+if(TARGET target_clawdmeter)
+    target_sources(sim_itests PRIVATE tests/itest_clawdmeter.cpp)
+endif()
 target_link_libraries(sim_itests PRIVATE cli_lib)
 link_sim_targets(sim_itests)
 
