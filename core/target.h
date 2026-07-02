@@ -31,6 +31,18 @@ struct BoardDesc {
     int              button_count;  // length of buttons[]
 };
 
+// Which backend boots and drives a target's firmware. Native runs the firmware
+// in-process (sim_boot/sim_run_steps); qemu boots it in a child QEMU process
+// (Task 6). Kept here, next to SimTarget, since a target picks its backend.
+enum SimBackendKind { BACKEND_NATIVE = 0, BACKEND_QEMU };
+
+// QEMU machine parameters for a BACKEND_QEMU target: the -machine name and the
+// architecture qemu-system-<arch> to launch. Set iff backend == BACKEND_QEMU.
+struct QemuMachineSpec {
+    const char* machine;   // e.g. "esp32c3"
+    const char* arch;      // e.g. "riscv32"
+};
+
 // A registered target: an onboarded app the sim can boot. setup()/loop() are the
 // app's Arduino entry points (or a thin wrapper). The registry is populated at
 // link time by each target's board.cpp via a static initializer.
@@ -40,6 +52,10 @@ struct SimTarget {
     void           (*setup)();
     void           (*loop)();
     const BoardDesc* board;
+    // Defaulted so every existing aggregate initializer in targets/*/board.cpp
+    // (which only lists the five fields above) keeps compiling unchanged.
+    SimBackendKind        backend = BACKEND_NATIVE;
+    const QemuMachineSpec* qemu   = nullptr;
 };
 
 void             sim_register_target(const SimTarget* t);

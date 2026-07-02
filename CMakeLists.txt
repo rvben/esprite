@@ -65,6 +65,7 @@ esprite_warnings(peripherals)
 add_library(core STATIC
     core/target.cpp
     core/runtime.cpp
+    core/backend.cpp
 )
 target_include_directories(core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core)
 target_link_libraries(core PUBLIC shims)
@@ -221,6 +222,7 @@ add_executable(sim_tests
     tests/test_tft_espi.cpp
     tests/test_cli.cpp
     tests/test_daemon.cpp
+    tests/test_backend.cpp
 )
 target_link_libraries(sim_tests PRIVATE cli_lib)
 link_sim_targets(sim_tests)

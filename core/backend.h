@@ -1,0 +1,33 @@
+#pragma once
+#include <string>
+#include "target.h"
+
+// Seam between the CLI and whatever actually runs a target's firmware. Native
+// runs it in-process (the historical behavior, now delegated through here);
+// Task 6 adds a qemu backend that boots the firmware in a child QEMU process.
+// Boot paths and the serve-loop pump go through sim_backend(); scenario and
+// the screenshot/ui/snapshot/input paths stay native-only for now.
+struct SimBackend {
+    virtual ~SimBackend() = default;
+    virtual bool boot(const SimTarget* t, std::string* err) = 0;  // includes warmup
+    virtual void shutdown() = 0;
+    virtual bool settle_ms(unsigned ms) = 0;
+    virtual void tick() = 0;                       // serve-loop pump; native = run steps
+    virtual std::string serial_output() = 0;
+    virtual bool serial_inject(const std::string& data) = 0;
+    virtual const char* name() const = 0;          // "native" | "qemu"
+};
+
+// The active backend (native until a qemu boot selects otherwise).
+SimBackend& sim_backend();
+
+// Selects the backend for the given target's SimBackendKind. Called by the
+// boot paths (one-shot boot_or_die, serve, the daemon's boot command) before
+// boot() so the rest of the session runs against the right implementation.
+void sim_backend_select(const SimTarget* t);
+
+// Layering: core knows only the native impl. Other backends register here
+// (Task 6: cli calls qemu_backend_install() once at esprite_main entry) so
+// core never links against qemu code. sim_backend_select falls back to native
+// for any kind with no registered implementation.
+void sim_backend_register(SimBackendKind kind, SimBackend* impl);

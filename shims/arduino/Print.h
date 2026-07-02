@@ -30,3 +30,9 @@ bool        sim_serial_contains(const std::string& regex);
 bool        sim_serial_regex_valid(const std::string& regex);
 void        sim_serial_inject(const std::string& data);
 void        sim_serial_clear();
+
+// Regex match over an arbitrary string, using the same mechanics as
+// sim_serial_contains. Lets callers that hold serial output from elsewhere
+// (e.g. a non-native SimBackend) match it the same way without duplicating
+// the regex code sim_serial_contains uses on the native capture.
+bool sim_serial_regex_search(const std::string& text, const std::string& regex);

@@ -3,6 +3,7 @@
 #include "actions.h"
 #include "runtime.h"
 #include "target.h"
+#include "backend.h"
 #include "screenshot.h"
 #include "scenario.h"
 #include "sim_input.h"
@@ -27,7 +28,11 @@
 #include <csignal>
 #include <unistd.h>
 
-static const int WARMUP_STEPS = 60;
+// Steps to run after a serial injection before checking for a match: enough
+// for the firmware to react and print, without an unbounded wait. Same value
+// as a backend's post-boot warmup (core/backend.cpp), reused here because
+// both are "give the firmware a beat to produce output" pumps, not boots.
+static const int SERIAL_SETTLE_STEPS = 60;
 
 // Stamped by the build from the CMake project version: one source of truth
 // for --version, the schema, and the release tag.
@@ -246,9 +251,13 @@ static int boot_or_die(int argc, char** argv) {
     std::string t = resolve_target(argc, argv);
     if (t.empty())
         return fail("no_target", "no --target and more than one target registered", 2);
-    if (!sim_boot(t))
+    const SimTarget* target = sim_target(t);
+    if (!target)
         return fail("unknown_target", "unknown target '" + t + "'", 2);
-    sim_run_steps(WARMUP_STEPS);   // sim_boot resets UI refs via its boot hook
+    sim_backend_select(target);
+    std::string err;
+    if (!sim_backend().boot(target, &err))   // sim_boot resets UI refs via its boot hook
+        return fail("unknown_target", "unknown target '" + t + "'", 2);
     return 0;
 }
 
@@ -369,8 +378,12 @@ int esprite_main(int argc, char** argv) {
         if (const char* p = opt_val(argc, argv, "--port")) setenv("ESPRITE_HTTP_PORT", p, 1);
         std::string t = resolve_target(argc, argv);
         if (t.empty()) return fail("no_target", "no --target and more than one target registered", 2);
-        if (!sim_boot(t)) return fail("unknown_target", "unknown target '" + t + "'", 2);
-        sim_run_steps(WARMUP_STEPS);
+        const SimTarget* target = sim_target(t);
+        if (!target) return fail("unknown_target", "unknown target '" + t + "'", 2);
+        sim_backend_select(target);
+        std::string boot_err;
+        if (!sim_backend().boot(target, &boot_err))
+            return fail("unknown_target", "unknown target '" + t + "'", 2);
 
         const char* shot = opt_val(argc, argv, "--shot");
         const char* port = getenv("ESPRITE_HTTP_PORT");
@@ -427,7 +440,7 @@ int esprite_main(int argc, char** argv) {
 
         auto last = std::chrono::steady_clock::now();
         while (!stop) {
-            sim_run_steps(4);              // pump handleClient() so POSTs land
+            sim_backend().tick();          // pump handleClient() so POSTs land
             ble_bridge_tick(ble);          // null-safe: shuttle BLE lines
             bool paced = false;
 #ifdef HAVE_SDL2
@@ -666,22 +679,22 @@ int esprite_main(int argc, char** argv) {
     if (cmd == "serial") {
         std::string sub = positional(argc, argv, 0), arg = positional(argc, argv, 1);
         if (sub == "send") {
-            sim_serial_inject(arg + "\n"); sim_run_steps(5);
+            sim_backend().serial_inject(arg + "\n"); sim_run_steps(5);
             emit("{\"ok\":true}", "sent");
             return 0;
         }
         if (sub == "expect") {
             if (!sim_serial_regex_valid(arg))
                 return fail("bad_args", "invalid regex '" + arg + "'", 2);
-            sim_run_steps(WARMUP_STEPS);
-            bool matched = sim_serial_contains(arg);
+            sim_run_steps(SERIAL_SETTLE_STEPS);
+            bool matched = sim_serial_regex_search(sim_backend().serial_output(), arg);
             emit("{\"matched\":" + std::string(jbool(matched)) + "}", matched ? "matched" : "no match");
             return matched ? 0 : 1;
         }
         return fail("bad_args", "serial takes 'send TEXT' or 'expect REGEX'", 2);
     }
     if (cmd == "logs") {
-        std::string s = sim_serial_output();
+        std::string s = sim_backend().serial_output();
         emit("{\"serial\":\"" + json_esc(s) + "\"}", s);
         return 0;
     }
@@ -727,9 +740,15 @@ int esprite_daemon(FILE* in, FILE* out) {
                 session_err(out, "already_booted", "one boot per run session; start a new session to boot again");
             } else {
                 std::string t = doc["target"] | "";
-                booted = sim_boot(t);
+                const SimTarget* target = sim_target(t);
+                std::string boot_err;
+                if (target) {
+                    sim_backend_select(target);
+                    booted = sim_backend().boot(target, &boot_err);   // sim_boot resets UI refs
+                } else {
+                    booted = false;
+                }
                 if (booted) {
-                    sim_run_steps(WARMUP_STEPS);   // sim_boot resets UI refs
                     fprintf(out, "{\"ok\":true}\n");
                 } else {
                     session_err(out, "unknown_target", "unknown target '" + t + "'");
@@ -837,18 +856,18 @@ int esprite_daemon(FILE* in, FILE* out) {
             std::string sub = doc["sub"] | "";
             if (sub == "send") {
                 std::string text = doc["text"] | "";
-                sim_serial_inject(text + "\n"); sim_run_steps(5); fprintf(out, "{\"ok\":true}\n");
+                sim_backend().serial_inject(text + "\n"); sim_run_steps(5); fprintf(out, "{\"ok\":true}\n");
             } else if (sub == "expect") {
                 std::string rx = doc["regex"] | "";
                 if (!sim_serial_regex_valid(rx)) {
                     session_err(out, "bad_args", "invalid regex '" + rx + "'");
                 } else {
-                    sim_run_steps(WARMUP_STEPS);
-                    fprintf(out, "{\"matched\":%s}\n", jbool(sim_serial_contains(rx)));
+                    sim_run_steps(SERIAL_SETTLE_STEPS);
+                    fprintf(out, "{\"matched\":%s}\n", jbool(sim_serial_regex_search(sim_backend().serial_output(), rx)));
                 }
             } else session_err(out, "bad_args", "serial takes sub send|expect");
         } else if (cmd == "logs") {
-            fprintf(out, "{\"serial\":\"%s\"}\n", json_esc(sim_serial_output()).c_str());
+            fprintf(out, "{\"serial\":\"%s\"}\n", json_esc(sim_backend().serial_output()).c_str());
         } else if (cmd == "quit" || cmd == "exit") {
             break;
         } else {

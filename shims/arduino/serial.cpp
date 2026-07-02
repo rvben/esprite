@@ -48,6 +48,9 @@ std::string sim_serial_output() { return g_out; }
 bool sim_serial_regex_valid(const std::string& rx) {
     try { std::regex probe(rx); return true; } catch (const std::regex_error&) { return false; }
 }
-bool sim_serial_contains(const std::string& rx) { return std::regex_search(g_out, std::regex(rx)); }
+bool sim_serial_regex_search(const std::string& text, const std::string& rx) {
+    return std::regex_search(text, std::regex(rx));
+}
+bool sim_serial_contains(const std::string& rx) { return sim_serial_regex_search(g_out, rx); }
 void sim_serial_inject(const std::string& d) { for (char c : d) g_in.push_back(c); }
 void sim_serial_clear() { g_out.clear(); g_in.clear(); }
