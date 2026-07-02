@@ -132,13 +132,21 @@ bool QemuProcess::spawn_only(const std::vector<std::string>& argv, std::string* 
     close_if_open(in_pipe[0]);
     close_if_open(out_pipe[1]);
 
+    // in_fd stays blocking: serial_write() is best-effort per its documented
+    // contract (a short synchronous write to the child's stdin), unlike
+    // out_fd's non-blocking drain in pump().
     in_fd = in_pipe[1];
     out_fd = out_pipe[0];
     pid = child;
     captured.clear();
 
     int flags = fcntl(out_fd, F_GETFL, 0);
-    fcntl(out_fd, F_SETFL, flags | O_NONBLOCK);
+    if (flags < 0) { set_errno_err(err, "fcntl(F_GETFL)"); stop(); return false; }
+    if (fcntl(out_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        set_errno_err(err, "fcntl(F_SETFL, O_NONBLOCK)");
+        stop();
+        return false;
+    }
     return true;
 }
 
@@ -224,10 +232,13 @@ void QemuProcess::stop() {
         // Defensive final reap: running()'s non-blocking waitpid should
         // already have reaped the child above, but a child that somehow
         // survives SIGKILL's wait window (e.g. stuck reaping under a
-        // debugger) must not be left a zombie.
+        // debugger) must not be left a zombie. Loop on EINTR exactly like
+        // running() does; a signal interrupting this blocking wait must not
+        // be mistaken for a completed reap.
         if (pid >= 0) {
             int status;
-            waitpid(pid, &status, 0);
+            pid_t r;
+            do { r = waitpid(pid, &status, 0); } while (r < 0 && errno == EINTR);
             pid = -1;
         }
     } else {
