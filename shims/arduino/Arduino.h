@@ -98,8 +98,10 @@ extern EspClass ESP;
 bool sim_esp_restart_requested();   // true once ESP.restart() has been called
 void sim_esp_restart_reset();       // clear the flag (called on each sim_boot)
 
-// strlcpy is BSD libc (present on macOS). Provide a fallback elsewhere.
-#if defined(__linux__)
+// strlcpy comes from BSD libc (macOS) and glibc 2.38+. Provide a fallback only
+// where the platform lacks it; redeclaring over glibc's version is an error.
+#if !defined(__APPLE__) && \
+    !(defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 38)))
 inline size_t strlcpy(char* dst, const char* src, size_t size) {
     size_t len = strlen(src);
     if (size) { size_t n = len < size - 1 ? len : size - 1; memcpy(dst, src, n); dst[n] = 0; }
