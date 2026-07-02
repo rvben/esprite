@@ -188,10 +188,22 @@ foreach(_t agentgauge sample_gfx cyd cyd_tft)
     endif()
 endforeach()
 
+# QEMU backend: a minimal blocking QMP client over a unix socket (Task 5 adds
+# the process manager on top of it; Task 6 wires it in as a SimBackend).
+add_library(qemu_backend STATIC backends/qemu/qmp.cpp)
+target_include_directories(qemu_backend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/backends/qemu)
+# ArduinoJson's optional Arduino String integration (ARDUINOJSON_ENABLE_ARDUINO_STRING,
+# set globally on the ArduinoJson target) pulls in Arduino.h even though qmp.cpp
+# never calls into it; the declarations-only shim header satisfies that without
+# linking the compiled shims library qmp.cpp otherwise has no need for.
+target_include_directories(qemu_backend PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/shims/arduino)
+target_link_libraries(qemu_backend PUBLIC ArduinoJson)
+esprite_warnings(qemu_backend)
+
 # Shared CLI implementation, linked by both the binary and the test runner.
 add_library(cli_lib STATIC cli/cli.cpp cli/scenario.cpp cli/actions.cpp cli/ble_bridge.cpp)
 target_include_directories(cli_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/cli)
-target_link_libraries(cli_lib PUBLIC core peripherals lvgl_glue ArduinoJson)
+target_link_libraries(cli_lib PUBLIC core peripherals lvgl_glue ArduinoJson qemu_backend)
 target_compile_definitions(cli_lib PRIVATE ESPRITE_VERSION="${PROJECT_VERSION}")
 esprite_warnings(cli_lib)
 if(SDL2_FOUND)
@@ -223,9 +235,15 @@ add_executable(sim_tests
     tests/test_cli.cpp
     tests/test_daemon.cpp
     tests/test_backend.cpp
+    tests/test_qmp.cpp
 )
 target_link_libraries(sim_tests PRIVATE cli_lib)
 link_sim_targets(sim_tests)
+
+# test_qmp.cpp runs a fake QMP server on a std::thread; pthreads is implicit
+# via libc++ on Apple but must be linked explicitly on Linux/glibc.
+find_package(Threads REQUIRED)
+target_link_libraries(sim_tests PRIVATE Threads::Threads)
 
 # Integration tests that boot real targets, isolated from unit tests so LVGL
 # global state stays clean.
