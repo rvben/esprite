@@ -73,5 +73,8 @@ qemu-fixtures:
 
 # Run the gated emulator integration tests (needs qemu-fetch + qemu-fixtures
 # to have been run first; sources .qemu/env.sh for ESPRITE_QEMU_RISCV32/XTENSA).
+# --repeat until-pass:2 tolerates one transient retry: the xtensa case runs
+# wall-clock and can miss its pump deadline under host load. A persistent
+# failure (fails both attempts) still fails the gate.
 qemu-test: build
-	. .qemu/env.sh && ctest --test-dir $(BUILD) -R sim_itests_qemu --output-on-failure
+	. .qemu/env.sh && ctest --test-dir $(BUILD) -R sim_itests_qemu --output-on-failure --repeat until-pass:2

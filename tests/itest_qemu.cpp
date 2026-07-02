@@ -74,6 +74,14 @@ std::string pump_until(QemuProcess& p, const std::string& marker, int deadline_m
     return p.serial_output();
 }
 
+// Returns the last `n` chars of `s` (or all of it if shorter), for compact
+// failure diagnostics: shows whether the guest hung early (empty/boot-banner
+// only) or was merely slow (ticks present but late) without dumping the
+// full, potentially large, serial capture into the failure message.
+std::string tail(const std::string& s, size_t n = 300) {
+    return s.size() <= n ? s : s.substr(s.size() - n);
+}
+
 }  // namespace
 
 TEST_CASE("C3 hello_world: two icount runs produce identical serial") {
@@ -99,7 +107,7 @@ TEST_CASE("C3 hello_world: two icount runs produce identical serial") {
         // bind tighter than `+`, so "text" + out would parse as
         // (mb * "text") + out and fail to compile.
         REQUIRE_MESSAGE(out.find("Restarting now.") != std::string::npos,
-                         "never reached the restart marker within 30s; captured: ", out);
+                         "never reached the restart marker within 30s; last 300 chars: ", tail(out));
         REQUIRE(out.find("Hello world!") != std::string::npos);
         return out.substr(0, out.find("Restarting now."));
     };
@@ -116,6 +124,15 @@ TEST_CASE("C3 hello_world: two icount runs produce identical serial") {
     MESSAGE("determinism verdict (C3, icount): ", verdict);
 }
 
+// The esp32 (xtensa) machine runs wall-clock, unlike the c3/icount case
+// above: guest progress tracks real elapsed time rather than a deterministic
+// instruction count, so it is directly sensitive to host scheduling load.
+// Measured flake under load was about 1 in 6 runs at a 30s deadline; 90s
+// gives enough headroom to absorb that without masking a genuine hang (which
+// still shows up as "arduino_tick boot" present but no "tick 2" in the
+// captured tail).
+constexpr int kXtensaPumpDeadlineMs = 90000;
+
 TEST_CASE("ESP32 arduino image boots and ticks") {
     std::string bin, img;
     if (!qemu_env(&bin, &img, "ESPRITE_QEMU_XTENSA", "arduino_esp32.bin")) {
@@ -126,14 +143,13 @@ TEST_CASE("ESP32 arduino image boots and ticks") {
     std::string err;
     QemuSpec s{bin, "esp32", img, false, tmp_sock_path()};
     REQUIRE_MESSAGE(p.start(s, &err), err);
-    std::string out = pump_until(p, "tick 2", 30000);
+    std::string out = pump_until(p, "tick 2", kXtensaPumpDeadlineMs);
     p.stop();
     // Require the actual marker pump_until was told to wait for, not just
     // the earlier boot banner: pump_until returns the partial output on a
-    // 30s timeout rather than failing, so asserting only on
-    // "arduino_tick boot" would let a hang between boot and the second tick
-    // pass silently.
+    // timeout rather than failing, so asserting only on "arduino_tick boot"
+    // would let a hang between boot and the second tick pass silently.
     REQUIRE_MESSAGE(out.find("tick 2") != std::string::npos,
-                     "never reached 'tick 2' within 30s; captured: ", out);
+                     "never reached 'tick 2' within 90s; last 300 chars: ", tail(out));
     CHECK(out.find("arduino_tick boot") != std::string::npos);
 }
