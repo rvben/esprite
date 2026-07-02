@@ -244,7 +244,7 @@ static const std::string kSchema = std::string(R"JSON({
     { "kind": "unsupported", "description": "The command targets a capability the active board lacks (e.g. battery/rotate on a board without it, or a button the board does not have), or a non-tier-1 command (anything but serial/logs/serve) on a qemu-backed target.", "exit_code": 7 },
     { "kind": "bad_args", "description": "Missing or invalid arguments for the command.", "exit_code": 2 },
     { "kind": "expect_failed", "description": "A scenario/run 'expect' assertion did not hold (text present/absent mismatch).", "exit_code": 8 },
-    { "kind": "backend_unavailable", "description": "A qemu-backed target could not boot: no qemu-system-<arch> binary configured (set ESPRITE_QEMU_BIN, or ESPRITE_QEMU_RISCV32/ESPRITE_QEMU_XTENSA per the target's architecture), ESPRITE_QEMU_IMAGE unset or not found (the flash image path), or the child process failed to spawn or never reached a running QMP state.", "exit_code": 2 }
+    { "kind": "backend_unavailable", "description": "A qemu-backed target could not boot: no qemu-system-<arch> binary configured (set ESPRITE_QEMU_BIN, or ESPRITE_QEMU_RISCV32/ESPRITE_QEMU_XTENSA per the target's architecture), ESPRITE_QEMU_IMAGE unset or not found (the flash image path), or the child process failed to spawn or never reached a running QMP state. Also covers 'serial send' failing against a qemu-backed target whose child has exited or closed its stdin pipe.", "exit_code": 2 }
   ]
 })JSON";
 
@@ -808,7 +808,9 @@ int esprite_main(int argc, char** argv) {
     if (cmd == "serial") {
         std::string sub = positional(argc, argv, 0), arg = positional(argc, argv, 1);
         if (sub == "send") {
-            sim_backend().serial_inject(arg + "\n"); serial_settle(5);
+            if (!sim_backend().serial_inject(arg + "\n"))
+                return fail("backend_unavailable", "serial write failed (backend not running or pipe closed)", 2);
+            serial_settle(5);
             emit("{\"ok\":true}", "sent");
             return 0;
         }
@@ -1030,7 +1032,12 @@ int esprite_daemon(FILE* in, FILE* out) {
             std::string sub = doc["sub"] | "";
             if (sub == "send") {
                 std::string text = doc["text"] | "";
-                sim_backend().serial_inject(text + "\n"); serial_settle(5); fprintf(out, "{\"ok\":true}\n");
+                if (!sim_backend().serial_inject(text + "\n")) {
+                    session_err(out, "backend_unavailable", "serial write failed (backend not running or pipe closed)");
+                } else {
+                    serial_settle(5);
+                    fprintf(out, "{\"ok\":true}\n");
+                }
             } else if (sub == "expect") {
                 std::string rx = doc["regex"] | "";
                 if (!sim_serial_regex_valid(rx)) {
