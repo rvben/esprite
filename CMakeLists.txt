@@ -182,22 +182,30 @@ endforeach()
 
 # Onboarded targets: board variants (which run a shared firmware) and standalone
 # apps. Each provides its own CMakeLists via add_subdirectory.
-foreach(_t agentgauge sample_gfx cyd cyd_tft)
+foreach(_t agentgauge sample_gfx cyd cyd_tft qemu_esp32c3)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/targets/${_t}/CMakeLists.txt)
         add_subdirectory(targets/${_t})
     endif()
 endforeach()
 
-# QEMU backend: a minimal blocking QMP client over a unix socket (Task 5 adds
-# the process manager on top of it; Task 6 wires it in as a SimBackend).
-add_library(qemu_backend STATIC backends/qemu/qmp.cpp backends/qemu/qemu_process.cpp)
+# QEMU backend: a minimal blocking QMP client over a unix socket, a process
+# manager on top of it, and the SimBackend implementation that wires it into
+# core's backend registry so BACKEND_QEMU targets boot a real QEMU child.
+add_library(qemu_backend STATIC
+    backends/qemu/qmp.cpp
+    backends/qemu/qemu_process.cpp
+    backends/qemu/qemu_backend.cpp
+)
 target_include_directories(qemu_backend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/backends/qemu)
 # ArduinoJson's optional Arduino String integration (ARDUINOJSON_ENABLE_ARDUINO_STRING,
 # set globally on the ArduinoJson target) pulls in Arduino.h even though qmp.cpp
 # never calls into it; the declarations-only shim header satisfies that without
-# linking the compiled shims library qmp.cpp otherwise has no need for.
+# linking the compiled shims library this library otherwise has no need for.
 target_include_directories(qemu_backend PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/shims/arduino)
-target_link_libraries(qemu_backend PUBLIC ArduinoJson)
+# core: qemu_backend.cpp implements SimBackend and calls sim_backend_register
+# (core/backend.h, core/target.h). Core itself never links back against qemu
+# code, so the registration hook keeps that layering one-directional.
+target_link_libraries(qemu_backend PUBLIC ArduinoJson core)
 esprite_warnings(qemu_backend)
 
 # Shared CLI implementation, linked by both the binary and the test runner.

@@ -4,6 +4,7 @@
 #include "runtime.h"
 #include "target.h"
 #include "backend.h"
+#include "qemu_backend.h"
 #include "screenshot.h"
 #include "scenario.h"
 #include "sim_input.h"
@@ -34,6 +35,28 @@
 // both are "give the firmware a beat to produce output" pumps, not boots.
 static const int SERIAL_SETTLE_STEPS = 60;
 
+// Ensures the active backend's child process (if any) never outlives one CLI
+// invocation or run session: destroyed on every exit path - success, an
+// error envelope's early return, daemon EOF/quit, and the serve
+// SIGINT/SIGTERM loop break, since all of those unwind through the scope
+// this guard is declared in. No-op for native; qemu's shutdown() stops the
+// QEMU child and removes its scratch socket dir. shutdown() is idempotent,
+// so it is safe to declare one of these in both esprite_main (which calls
+// esprite_daemon for the `run` command) and esprite_daemon itself (tests
+// call it directly, bypassing esprite_main).
+struct BackendShutdownGuard {
+    ~BackendShutdownGuard() { sim_backend().shutdown(); }
+};
+
+// Commands a qemu-backed target currently supports (tier 1: serial
+// output/input and the serve lifecycle, plus session bookkeeping). Everything
+// else assumes an in-process framebuffer/widget-tree/GPIO/BLE surface that no
+// qemu target has, so it is gated to `unsupported` before boot - no QEMU
+// process is ever spawned for a command this returns false for.
+static bool qemu_tier1_command(const std::string& cmd) {
+    return cmd == "serial" || cmd == "logs" || cmd == "quit" || cmd == "exit";
+}
+
 // Stamped by the build from the CMake project version: one source of truth
 // for --version, the schema, and the release tag.
 #ifndef ESPRITE_VERSION
@@ -63,7 +86,8 @@ static const std::string kSchema = std::string(R"JSON({
         { "name": "height", "description": "Screen height in px.", "type": "number" },
         { "name": "buttons", "description": "Physical button count.", "type": "number" },
         { "name": "battery", "description": "Board has a battery.", "type": "boolean" },
-        { "name": "rotation", "description": "Board supports rotation.", "type": "boolean" }
+        { "name": "rotation", "description": "Board supports rotation.", "type": "boolean" },
+        { "name": "backend", "description": "native (runs in-process) or qemu (boots in a child QEMU process; serial/logs/serve only - see backend_unavailable for the env var contract).", "type": "string" }
       ] },
     { "name": "ui", "description": "Snapshot the active LVGL widget tree as an array of elements; act on the refs with 'tap --ref'. Empty for non-LVGL targets.", "mutating": false, "stability": "stable",
       "example": { "args": ["--target", "agentgauge"], "stdin": "" },
@@ -158,9 +182,10 @@ static const std::string kSchema = std::string(R"JSON({
     { "kind": "ref_not_found", "description": "tap --ref referenced a widget not in the current ui snapshot.", "exit_code": 4 },
     { "kind": "conflict", "description": "An argument or option conflicts with another (e.g. tap given both --ref and x/y).", "exit_code": 5 },
     { "kind": "post_failed", "description": "snapshot could not be delivered to the running target (connect failed or body exceeds the server read size).", "exit_code": 6 },
-    { "kind": "unsupported", "description": "The command targets a capability the active board lacks (e.g. battery/rotate on a board without it, or a button the board does not have).", "exit_code": 7 },
+    { "kind": "unsupported", "description": "The command targets a capability the active board lacks (e.g. battery/rotate on a board without it, or a button the board does not have), or a non-tier-1 command (anything but serial/logs/serve) on a qemu-backed target.", "exit_code": 7 },
     { "kind": "bad_args", "description": "Missing or invalid arguments for the command.", "exit_code": 2 },
-    { "kind": "expect_failed", "description": "A scenario/run 'expect' assertion did not hold (text present/absent mismatch).", "exit_code": 8 }
+    { "kind": "expect_failed", "description": "A scenario/run 'expect' assertion did not hold (text present/absent mismatch).", "exit_code": 8 },
+    { "kind": "backend_unavailable", "description": "A qemu-backed target could not boot: no qemu-system-<arch> binary configured (set ESPRITE_QEMU_BIN, or ESPRITE_QEMU_RISCV32/ESPRITE_QEMU_XTENSA per the target's architecture), ESPRITE_QEMU_IMAGE unset or not found (the flash image path), or the child process failed to spawn or never reached a running QMP state.", "exit_code": 2 }
   ]
 })JSON";
 
@@ -257,7 +282,9 @@ static int boot_or_die(int argc, char** argv) {
     sim_backend_select(target);
     std::string err;
     if (!sim_backend().boot(target, &err))   // sim_boot resets UI refs via its boot hook
-        return fail("unknown_target", "unknown target '" + t + "'", 2);
+        // target exists, so this is a real boot failure (e.g. qemu env/spawn/QMP),
+        // not an unknown key - surface the backend's own message.
+        return fail("backend_unavailable", err.empty() ? ("could not boot '" + t + "'") : err, 2);
     return 0;
 }
 
@@ -314,6 +341,8 @@ static std::string bounded_array(const std::string& arr, int offset, int limit) 
            ",\"truncated\":" + jbool(truncated) + "}";
 }
 int esprite_main(int argc, char** argv) {
+    qemu_backend_install();   // core never links qemu code directly; this is the one wiring point
+    BackendShutdownGuard backend_guard;
     set_output_mode(argc, argv);
     if (argc < 2 || !strcmp(argv[1], "--help") || !strcmp(argv[1], "help")) {
         printf("%s\n", kSchema.c_str());
@@ -349,6 +378,7 @@ int esprite_main(int argc, char** argv) {
             if (want("buttons"))o += "\"buttons\":" + std::to_string(t->board->button_count) + ",";
             if (want("battery"))o += std::string("\"battery\":") + jbool(t->board->has_battery) + ",";
             if (want("rotation"))o += std::string("\"rotation\":") + jbool(t->board->has_rotation) + ",";
+            if (want("backend")) o += "\"backend\":\"" + std::string(t->backend == BACKEND_QEMU ? "qemu" : "native") + "\",";
             if (!o.empty() && o.back() == ',') o.pop_back();
             o += "}";
             json += (shown ? "," : "") + o;
@@ -368,7 +398,14 @@ int esprite_main(int argc, char** argv) {
         std::string file = positional(argc, argv, 0);
         if (file.empty()) return fail("bad_args", "scenario needs a file path", 2);
         std::string def = resolve_target(argc, argv);
-        return scenario_run(file, def.empty() ? "agentgauge" : def);
+        std::string effective = def.empty() ? "agentgauge" : def;
+        // scenario_run stays native-only (it drives the in-process
+        // framebuffer/widget tree); gate before ever opening the file, so no
+        // QEMU process is spawned for a target this can never support.
+        if (const SimTarget* target = sim_target(effective))
+            if (target->backend == BACKEND_QEMU)
+                return fail("unsupported", "scenario is native-only; '" + effective + "' boots via qemu", 7);
+        return scenario_run(file, effective);
     }
 
     if (cmd == "serve") {
@@ -380,16 +417,28 @@ int esprite_main(int argc, char** argv) {
         if (t.empty()) return fail("no_target", "no --target and more than one target registered", 2);
         const SimTarget* target = sim_target(t);
         if (!target) return fail("unknown_target", "unknown target '" + t + "'", 2);
+        bool is_qemu = target->backend == BACKEND_QEMU;
+        // A qemu target has no in-process framebuffer, window, or BLE link to
+        // serve - reject before boot so no QEMU process is ever spawned for a
+        // request this can never satisfy.
+        if (is_qemu && opt_val(argc, argv, "--shot"))
+            return fail("unsupported", "--shot needs a framebuffer; '" + t + "' boots via qemu", 7);
+        if (is_qemu && opt_flag(argc, argv, "--window"))
+            return fail("unsupported", "--window needs a framebuffer; '" + t + "' boots via qemu", 7);
+        if (is_qemu && opt_val(argc, argv, "--ble-port"))
+            return fail("unsupported", "--ble-port needs the native BLE link; '" + t + "' boots via qemu", 7);
         sim_backend_select(target);
         std::string boot_err;
         if (!sim_backend().boot(target, &boot_err))
-            return fail("unknown_target", "unknown target '" + t + "'", 2);
+            return fail("backend_unavailable", boot_err.empty() ? ("could not boot '" + t + "'") : boot_err, 2);
 
         const char* shot = opt_val(argc, argv, "--shot");
         const char* port = getenv("ESPRITE_HTTP_PORT");
         // If the target ran an HTTP server but its bind failed (port in use), a
-        // live bridge could never reach it. Fail loudly instead of looping.
-        if (sim_http_bind_status() == 0)
+        // live bridge could never reach it. Fail loudly instead of looping. A
+        // qemu target never runs the native webserver, so there is nothing to
+        // check here.
+        if (!is_qemu && sim_http_bind_status() == 0)
             return fail("bind_failed", std::string("could not bind HTTP port ") + (port ? port : "8080"), 3);
         int interval = 1000;
         if (const char* iv = opt_val(argc, argv, "--interval-ms")) interval = atoi(iv);
@@ -410,17 +459,23 @@ int esprite_main(int argc, char** argv) {
                             "(install SDL2 and rebuild)\n");
 #endif
 
-        // Report the port the target actually bound (matters when --port 0 asked
-        // the OS for an ephemeral port), not the raw requested value.
-        int bound = sim_http_bind_status();
-        std::string bound_port = bound > 0 ? std::to_string(bound) : (port ? port : "8080");
-        fprintf(stderr, "esprite: serving '%s' at http://127.0.0.1:%s/snapshot%s\n",
-                t.c_str(), bound_port.c_str(),
-                shot ? "" : " (pass --shot to capture frames)");
-        if (shot) sim_screenshot_png(shot);
+        if (is_qemu) {
+            fprintf(stderr, "esprite: serving '%s' via qemu (serial/logs only; no HTTP snapshot)\n",
+                    t.c_str());
+        } else {
+            // Report the port the target actually bound (matters when --port 0
+            // asked the OS for an ephemeral port), not the raw requested value.
+            int bound = sim_http_bind_status();
+            std::string bound_port = bound > 0 ? std::to_string(bound) : (port ? port : "8080");
+            fprintf(stderr, "esprite: serving '%s' at http://127.0.0.1:%s/snapshot%s\n",
+                    t.c_str(), bound_port.c_str(),
+                    shot ? "" : " (pass --shot to capture frames)");
+            if (shot) sim_screenshot_png(shot);
+        }
 
         // Live BLE bridge: expose the virtual link on a localhost socket so a
         // real host process can drive a BLE firmware (newline-delimited JSON).
+        // Gated above for qemu targets, so this only ever runs for native.
         BleBridge* ble = nullptr;
         if (const char* bp = opt_val(argc, argv, "--ble-port")) {
             if (!sim_ble_available())
@@ -478,6 +533,15 @@ int esprite_main(int argc, char** argv) {
     for (auto* k : kBootCommands) if (cmd == k) { known = true; break; }
     if (!known)
         return fail("bad_args", "unknown command '" + cmd + "' (try: esprite schema)", 2);
+    // Gate before boot_or_die spawns anything: a qemu target only supports
+    // serial/logs right now (see qemu_tier1_command), so a command like
+    // `screenshot --target qemu_esp32c3` never gets as far as starting QEMU.
+    {
+        std::string rt = resolve_target(argc, argv);
+        if (const SimTarget* rtarget = rt.empty() ? nullptr : sim_target(rt))
+            if (rtarget->backend == BACKEND_QEMU && !qemu_tier1_command(cmd))
+                return fail("unsupported", "'" + cmd + "' is not supported on qemu-backed target '" + rt + "' (serial/logs only)", 7);
+    }
     if (boot_or_die(argc, argv) != 0) return 2;
 
     if (cmd == "ui") {
@@ -713,8 +777,10 @@ static void session_err(FILE* out, const char* kind, const std::string& msg) {
 // for {"cmd":"tap","ref":...} within the session (the snapshot-ref model).
 // Streams are injected so tests can drive a full session in-process.
 int esprite_daemon(FILE* in, FILE* out) {
+    BackendShutdownGuard backend_guard;   // tests call esprite_daemon directly, bypassing esprite_main
     char line[16384];
     bool booted = false;
+    bool is_qemu = false;
     while (fgets(line, sizeof(line), in)) {
         // A line beyond the buffer would otherwise be parsed as two commands,
         // desyncing 1-in/1-out reply pairing. Drain it and reply with one error.
@@ -745,17 +811,26 @@ int esprite_daemon(FILE* in, FILE* out) {
                 if (target) {
                     sim_backend_select(target);
                     booted = sim_backend().boot(target, &boot_err);   // sim_boot resets UI refs
+                    is_qemu = target->backend == BACKEND_QEMU;
                 } else {
                     booted = false;
                 }
                 if (booted) {
                     fprintf(out, "{\"ok\":true}\n");
+                } else if (target) {
+                    // target exists, so this is a real boot failure (e.g. qemu
+                    // env/spawn/QMP), not an unknown key.
+                    session_err(out, "backend_unavailable", boot_err.empty() ? ("could not boot '" + t + "'") : boot_err);
                 } else {
                     session_err(out, "unknown_target", "unknown target '" + t + "'");
                 }
             }
+        } else if (cmd == "quit" || cmd == "exit") {
+            break;
         } else if (!booted) {
             session_err(out, "not_booted", "boot a target first");
+        } else if (is_qemu && !qemu_tier1_command(cmd)) {
+            session_err(out, "unsupported", "'" + cmd + "' is not supported on a qemu-backed target (serial/logs only)");
         } else if (cmd == "ui") {
             fprintf(out, "%s\n", lvgl_snapshot_json().c_str());
         } else if (cmd == "screenshot") {
@@ -868,8 +943,6 @@ int esprite_daemon(FILE* in, FILE* out) {
             } else session_err(out, "bad_args", "serial takes sub send|expect");
         } else if (cmd == "logs") {
             fprintf(out, "{\"serial\":\"%s\"}\n", json_esc(sim_backend().serial_output()).c_str());
-        } else if (cmd == "quit" || cmd == "exit") {
-            break;
         } else {
             session_err(out, "bad_args", "unknown cmd '" + cmd + "'");
         }

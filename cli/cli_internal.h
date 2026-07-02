@@ -42,7 +42,7 @@ inline int kind_exit(const std::string& kind) {
     if (kind == "unsupported")   return 7;
     if (kind == "bind_failed")   return 3;
     if (kind == "expect_failed") return 8;
-    return 2;   // bad_args, no_target, unknown_target
+    return 2;   // bad_args, no_target, unknown_target, backend_unavailable
 }
 
 // Parse a complete integer within [min,max]. Rejects garbage, trailing text,

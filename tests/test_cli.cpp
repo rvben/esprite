@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <csignal>
+#include <cstdlib>
 
 static bool file_exists(const char* p) { struct stat st; return stat(p, &st) == 0; }
 
@@ -231,6 +232,53 @@ TEST_CASE("serial expect with an invalid regex is bad_args, not a crash") {
     // Regression: a malformed pattern threw std::regex_error out of esprite_main
     // and aborted the whole process instead of reporting a structured error.
     CHECK(run_cli({"esprite", "serial", "expect", "(", "--target", "sample_gfx"}) == 2);
+}
+
+TEST_CASE("qemu target is listed with backend=qemu, others stay native") {
+    std::string out;
+    CHECK(run_cli_out({"esprite", "list-targets", "--json"}, &out) == 0);
+    CHECK(out.find("\"key\":\"qemu_esp32c3\"") != std::string::npos);
+    CHECK(out.find("\"backend\":\"qemu\"") != std::string::npos);
+    CHECK(out.find("\"backend\":\"native\"") != std::string::npos);
+}
+
+// Clears the env vars a qemu boot consults, so tests never depend on ambient
+// shell state (e.g. a developer having sourced .qemu/env.sh) and always
+// exercise the "nothing configured" path deterministically.
+static void clear_qemu_env() {
+    unsetenv("ESPRITE_QEMU_BIN");
+    unsetenv("ESPRITE_QEMU_RISCV32");
+    unsetenv("ESPRITE_QEMU_XTENSA");
+    unsetenv("ESPRITE_QEMU_IMAGE");
+}
+
+TEST_CASE("qemu boot without env configured fails backend_unavailable") {
+    clear_qemu_env();
+    std::string err;
+    CHECK(run_cli_err({"esprite", "serial", "expect", "x", "--target", "qemu_esp32c3"}, &err) == 2);
+    CHECK(err.find("\"kind\":\"backend_unavailable\"") != std::string::npos);
+}
+
+TEST_CASE("non-tier-1 commands on a qemu target are unsupported before boot") {
+    // None of these need a real QEMU binary: the gate fires before boot_or_die
+    // ever runs, so no env needs to be configured and no process is spawned.
+    clear_qemu_env();
+    std::string err;
+
+    CHECK(run_cli_err({"esprite", "screenshot", "x.png", "--target", "qemu_esp32c3"}, &err) == 7);
+    CHECK(err.find("\"kind\":\"unsupported\"") != std::string::npos);
+
+    // A nonexistent scenario file would normally be bad_args (file not found),
+    // but the qemu gate fires first since scenario is native-only.
+    CHECK(run_cli_err({"esprite", "scenario", "/nonexistent.json", "--target", "qemu_esp32c3"}, &err) == 7);
+    CHECK(err.find("\"kind\":\"unsupported\"") != std::string::npos);
+
+    CHECK(run_cli_err({"esprite", "serve", "--shot", "x.png", "--target", "qemu_esp32c3"}, &err) == 7);
+    CHECK(err.find("\"kind\":\"unsupported\"") != std::string::npos);
+    CHECK(run_cli_err({"esprite", "serve", "--window", "--target", "qemu_esp32c3"}, &err) == 7);
+    CHECK(err.find("\"kind\":\"unsupported\"") != std::string::npos);
+    CHECK(run_cli_err({"esprite", "serve", "--ble-port", "9000", "--target", "qemu_esp32c3"}, &err) == 7);
+    CHECK(err.find("\"kind\":\"unsupported\"") != std::string::npos);
 }
 
 TEST_CASE("--json is a global flag, never consumed as a positional") {
