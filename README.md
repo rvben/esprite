@@ -1,9 +1,16 @@
 # esprite
 
-A host-native ESP32 simulator. It boots ESP32 / Arduino firmware **compiled from
-source** on your machine, renders the device display into an offscreen
-framebuffer, and drives it with an agent-device-style CLI: screenshots, input
-injection (GPIO, buttons, touch), serial, and scripted scenarios.
+An ESP32 firmware simulator driven by an agent-device-style CLI, with two
+backends behind one contract:
+
+- **Host-native (default):** boots ESP32 / Arduino firmware **compiled from
+  source** on your machine, renders the device display into an offscreen
+  framebuffer, and drives it: screenshots, input injection (GPIO, buttons,
+  touch), serial, and scripted scenarios. Fast, deterministic, no
+  cross-toolchain needed.
+- **QEMU (optional):** boots a **real compiled flash image** under Espressif's
+  QEMU fork and drives it serial-first through the same CLI, including
+  binaries you cannot build from source. See "The QEMU backend" below.
 
 It is a reusable tool, not tied to any one app. A **firmware** is compiled once
 and is board-agnostic (it renders itself from `board_caps()` at runtime); a
@@ -162,6 +169,31 @@ the session (one boot per session; `steps` advances virtual time explicitly):
 Raw-GFX targets (no widget tree) return `[]` from `ui` and are driven by pixels +
 screenshots.
 
+## The QEMU backend
+
+Every target above runs host-native. The `qemu_esp32c3` target instead boots a
+real ESP32-C3 flash image under Espressif's QEMU fork. It sees what the
+host-native backend cannot: the real RTOS scheduler, real heap pressure,
+watchdogs, binary-only components, and it runs images you did not build
+yourself.
+
+```bash
+make qemu-fetch        # pinned prebuilt Espressif QEMU (no source build)
+ESPRITE_QEMU_IMAGE=path/to/flash.bin \
+  ./build/esprite serial expect 'Hello world' --target qemu_esp32c3
+make qemu-fixtures     # scripted demo images (needs docker + arduino-cli)
+make qemu-test         # gated integration tests (self-skip without QEMU)
+```
+
+Support is serial-first for now: `serial`, `logs`, and headless `serve` work;
+every other command degrades explicitly to `unsupported`, exactly like a board
+without a battery rejects `battery`. Execution is deterministic on ESP32-C3
+(icount: same image, same serial bytes, every run); ESP32/S3 (Xtensa) run
+wall-clock only in the current fork release. `list-targets` reports each
+target's `backend`, and a missing emulator or image yields the
+`backend_unavailable` error kind with the missing piece named. Display,
+input, and networking over QEMU are on the roadmap.
+
 ## How it works
 
 The firmware's own source files are compiled unchanged. Only two things are
@@ -169,10 +201,12 @@ swapped: a set of host shims that stand in for the Arduino / ESP-IDF APIs, and a
 board layer that binds the app's hardware calls to virtual peripherals.
 
 ```
-core/          virtual clock + setup()/loop() pump + target registry
+core/          virtual clock + setup()/loop() pump + target registry +
+               the SimBackend seam (native vs qemu)
 shims/         Arduino, ESP-IDF, and networking APIs (host-backed)
 peripherals/   framebuffer + PNG screenshot, LVGL glue, Arduino_GFX shim,
                injected input bus
+backends/      the QEMU backend: child process driven over QMP + stdio serial
 cli/           the esprite CLI
 targets/       one folder per onboarded app
 ```
@@ -222,9 +256,10 @@ intervals, or bonding storage); no QSPI or panel electrical quirks; no PSRAM
 exhaustion; audio is silent.
 
 This is not a substitute for on-hardware QA of timing, radio, or panel behavior.
-It is authoritative for the UI, layout, and data-path rendering. A future backend
-that runs the real compiled binary (Renode or Espressif-QEMU) behind the same CLI
-is possible but not built.
+The host-native backend is authoritative for UI, layout, and data-path
+rendering. The QEMU backend runs the real compiled binary and is authoritative
+for serial-observable firmware behavior (RTOS scheduling, heap, watchdogs,
+binary-only components); it has no display, input, or networking yet.
 
 ## Notes
 
