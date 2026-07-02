@@ -44,7 +44,8 @@ struct WinRect { int x, y, w, h; };
 bool win_rect_contains(const WinRect& r, int x, int y);
 
 struct NubLayout {
-    WinRect body;     // drawn nub rect (output coords)
+    WinRect body;     // drawn nub rect (output coords), inset HIT_INFLATE from
+                      // the window edge so its hit rect stays fully on-window
     WinRect hit;      // click target (body inflated by HIT_INFLATE)
     int     button;   // index into BoardDesc::buttons
     SimEdge edge;
@@ -75,7 +76,11 @@ WindowLayout window_layout(const BoardDesc* board, int scale);
 
 // Overlay geometry, in the same window-absolute coordinates as WindowLayout:
 WinRect layout_help_card(const WindowLayout& l);
-WinRect layout_panel_card(const WindowLayout& l);          // bottom-right
+// Bottom-right, anchored PANEL_MARGIN off the window's own edges. Sized at
+// PANEL_CARD_W x PANEL_CARD_H unless the window is too small to hold that -
+// then each dimension shrinks to fit (floor 0), so the card always nests
+// fully inside the window regardless of how small the board is.
+WinRect layout_panel_card(const WindowLayout& l);
 
 struct PanelLayout { WinRect bat_bar, chg_btn, usb_btn, rot_btn; };
 // Positions the controls the board actually has inside the fixed-size panel

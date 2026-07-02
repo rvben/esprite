@@ -49,8 +49,51 @@ const BoardDesc kNineBoard = {
     "fixture-nine", 480, 480, false, false, false, kNine, 9,
 };
 
+// One button per edge, to exercise EDGE_LEFT/EDGE_TOP/EDGE_BOTTOM as well as
+// EDGE_RIGHT (every other fixture above only uses EDGE_RIGHT).
+const SimButton kAllEdges[] = {
+    {"R", ACT_PRIMARY,   0, 'r', EDGE_RIGHT,  0.5f},
+    {"L", ACT_SECONDARY, 0, 'l', EDGE_LEFT,   0.5f},
+    {"T", ACT_GPIO,      1, 't', EDGE_TOP,    0.5f},
+    {"B", ACT_PWR,       0, 'b', EDGE_BOTTOM, 0.5f},
+};
+const BoardDesc kAllEdgesBoard = {
+    "fixture-all-edges", 300, 200, false, false, false, kAllEdges, 4,
+};
+
+// A board far too small to hold the fixed-size panel card at full size:
+// exercises layout_panel_card's min-clamp on both width and height at once.
+const BoardDesc kTinyBoard = {
+    "fixture-tiny", 20, 20, false, false, false, nullptr, 0,
+};
+
 bool rects_overlap(const WinRect& a, const WinRect& b) {
     return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+// inner is fully contained in outer (both edges inclusive of outer's bounds).
+bool rect_within(const WinRect& inner, const WinRect& outer) {
+    return inner.x >= outer.x && inner.y >= outer.y &&
+           inner.x + inner.w <= outer.x + outer.w &&
+           inner.y + inner.h <= outer.y + outer.h;
+}
+
+// The nub body sits in the bezel strip for its edge: outside the screen, at
+// or before the window edge. This is the "outer NUB_PROTRUDE zone" property,
+// expressed generically off the layout's own screen/window rects rather than
+// restating the placement formula.
+bool body_in_edge_zone(const NubLayout& n, const WindowLayout& l) {
+    switch (n.edge) {
+    case EDGE_RIGHT:
+        return n.body.x >= l.screen.x + l.screen.w && n.body.x + n.body.w <= l.window.x + l.window.w;
+    case EDGE_LEFT:
+        return n.body.x + n.body.w <= l.screen.x && n.body.x >= l.window.x;
+    case EDGE_TOP:
+        return n.body.y + n.body.h <= l.screen.y && n.body.y >= l.window.y;
+    case EDGE_BOTTOM:
+        return n.body.y >= l.screen.y + l.screen.h && n.body.y + n.body.h <= l.window.y + l.window.h;
+    }
+    return false;
 }
 
 }  // namespace
@@ -111,24 +154,30 @@ TEST_CASE("explicit pos buttons center at their fraction of screen height, monot
     CHECK_FALSE(rects_overlap(l.nubs[1].body, l.nubs[2].body));
 }
 
-TEST_CASE("nub body sits flush against its edge's outer window boundary") {
-    WindowLayout l = window_layout(&kThreeRightBoard, 1);
-    for (int i = 0; i < l.nub_count; i++) {
-        CHECK(l.nubs[i].body.x == l.window.w - NUB_THICK);
-        CHECK(l.nubs[i].body.w == NUB_THICK);
-        CHECK(l.nubs[i].body.h == NUB_LONG);
-    }
-}
-
-TEST_CASE("every nub hit rect is body inflated by HIT_INFLATE and disjoint from the screen") {
-    WindowLayout l = window_layout(&kThreeRightBoard, 1);
-    for (int i = 0; i < l.nub_count; i++) {
-        const NubLayout& n = l.nubs[i];
-        CHECK(n.hit.x == n.body.x - HIT_INFLATE);
-        CHECK(n.hit.y == n.body.y - HIT_INFLATE);
-        CHECK(n.hit.w == n.body.w + 2 * HIT_INFLATE);
-        CHECK(n.hit.h == n.body.h + 2 * HIT_INFLATE);
-        CHECK_FALSE(rects_overlap(n.hit, l.screen));
+TEST_CASE("every nub's hit rect stays inside the window, disjoint from the screen, "
+          "with its body in the edge's bezel zone") {
+    // Spec-derived properties (not a restatement of the placement formula):
+    // a hit rect a real mouse could never reach is dead UI, so every nub on
+    // every edge, across scales, must satisfy all three at once.
+    struct Fixture { const BoardDesc* board; int scale; };
+    const Fixture fixtures[] = {
+        {&kThreeRightBoard, 1}, {&kThreeRightBoard, 2},
+        {&kMixedBoard, 1},
+        {&kNineBoard, 1},
+        {&kAllEdgesBoard, 1}, {&kAllEdgesBoard, 3},
+    };
+    for (const Fixture& f : fixtures) {
+        WindowLayout l = window_layout(f.board, f.scale);
+        REQUIRE(l.nub_count > 0);
+        for (int i = 0; i < l.nub_count; i++) {
+            const NubLayout& n = l.nubs[i];
+            CAPTURE(f.board->name);
+            CAPTURE(f.scale);
+            CAPTURE(i);
+            CHECK(rect_within(n.hit, l.window));
+            CHECK_FALSE(rects_overlap(n.hit, l.screen));
+            CHECK(body_in_edge_zone(n, l));
+        }
     }
 }
 
@@ -288,4 +337,18 @@ TEST_CASE("panel card stays nested inside the window even for a narrow real boar
     CHECK(panel.y >= l.window.y);
     CHECK(panel.x + panel.w <= l.window.x + l.window.w);
     CHECK(panel.y + panel.h <= l.window.y + l.window.h);
+}
+
+TEST_CASE("panel card min-clamps its size to fit a synthetic tiny board, fully nested") {
+    // kTinyBoard's whole window is smaller than PANEL_CARD_W/H, so position
+    // clamping alone (the sample_gfx fix above) isn't enough - the card
+    // itself must shrink, on both axes at once, to stay nested.
+    WindowLayout l = window_layout(&kTinyBoard, 1);
+    WinRect panel = layout_panel_card(l);
+    CHECK(panel.x >= l.window.x);
+    CHECK(panel.y >= l.window.y);
+    CHECK(panel.x + panel.w <= l.window.x + l.window.w);
+    CHECK(panel.y + panel.h <= l.window.y + l.window.h);
+    CHECK(panel.w < PANEL_CARD_W);   // proves the min-clamp actually engaged
+    CHECK(panel.h < PANEL_CARD_H);
 }

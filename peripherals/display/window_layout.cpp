@@ -91,17 +91,21 @@ WindowLayout window_layout(const BoardDesc* board, int scale) {
                            edge_origin + edge_length - NUB_LONG);
         }
 
+        // Inset by HIT_INFLATE from the absolute window edge: the hit rect
+        // (body inflated by HIT_INFLATE on every side) must stay inside the
+        // window, or its outward slice sits beyond any coordinate the mouse
+        // can reach and is dead click area.
         WinRect body;
         if (vertical) {
             body.y = start;
             body.h = NUB_LONG;
             body.w = NUB_THICK;
-            body.x = (edge == EDGE_RIGHT) ? l.window.w - NUB_THICK : 0;
+            body.x = (edge == EDGE_RIGHT) ? l.window.w - NUB_THICK - HIT_INFLATE : HIT_INFLATE;
         } else {
             body.x = start;
             body.w = NUB_LONG;
             body.h = NUB_THICK;
-            body.y = (edge == EDGE_BOTTOM) ? l.window.h - NUB_THICK : 0;
+            body.y = (edge == EDGE_BOTTOM) ? l.window.h - NUB_THICK - HIT_INFLATE : HIT_INFLATE;
         }
 
         l.nubs[i] = NubLayout{body, inflate(body, HIT_INFLATE), i, edge};
@@ -116,15 +120,28 @@ WinRect layout_help_card(const WindowLayout& l) {
 }
 
 WinRect layout_panel_card(const WindowLayout& l) {
+    // Size first: a window narrower or shorter than the fixed card (e.g. a
+    // tiny synthetic board) would overflow past the right/bottom edge if the
+    // card kept its full size, so shrink to fit before anchoring position.
+    // Floors at 0 - the card simply has no room to draw on a degenerate window.
+    int w = PANEL_CARD_W;
+    int h = PANEL_CARD_H;
+    int max_w = l.window.w - 2 * PANEL_MARGIN;
+    int max_h = l.window.h - 2 * PANEL_MARGIN;
+    if (w > max_w) w = max_w;
+    if (h > max_h) h = max_h;
+    if (w < 0) w = 0;
+    if (h < 0) h = 0;
+
     // Anchored PANEL_MARGIN off the bottom-right corner, but never past the
     // window's own top-left: a narrow board's window can be only a few
     // pixels wider than the (fixed-size) card, and PANEL_MARGIN would
     // otherwise push it off the left/top edge (e.g. sample_gfx at scale 1).
-    int x = l.window.x + l.window.w - PANEL_MARGIN - PANEL_CARD_W;
-    int y = l.window.y + l.window.h - PANEL_MARGIN - PANEL_CARD_H;
+    int x = l.window.x + l.window.w - PANEL_MARGIN - w;
+    int y = l.window.y + l.window.h - PANEL_MARGIN - h;
     if (x < l.window.x) x = l.window.x;
     if (y < l.window.y) y = l.window.y;
-    return WinRect{x, y, PANEL_CARD_W, PANEL_CARD_H};
+    return WinRect{x, y, w, h};
 }
 
 PanelLayout layout_panel(const WindowLayout& l, bool battery, bool rotation) {
