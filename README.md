@@ -65,12 +65,19 @@ For an interactive, iOS-Simulator-style view, run `serve` with `--window`:
 esprite serve --target agentgauge --port 8080 --window
 ```
 
-This opens a native SDL2 window that presents the device framebuffer live and
-lets you drive it: **mouse** = touch (click and drag), **space** = PRIMARY
-button, **tab** = SECONDARY, **p** = PWR, **Esc** = quit. PWR follows the
+This opens a native SDL2 window: the device screen, pixel-exact, inside a slim
+device bezel. The board's physical buttons appear as clickable nubs on the
+bezel edge at their declared positions (each target's `board.cpp` places
+them); hover a nub for its label and keyboard shortcut, press `?` for the
+full key list, and press `` ` `` (backtick) for the hardware-controls panel
+(battery level and charging/USB toggles, rotation) on boards that have them.
+**Mouse on the screen** = touch (click and drag); each button also has a
+board-declared key (agentgauge: **space** = PRIMARY, **tab** = SECONDARY,
+**p** = PWR); **Esc** closes an open overlay, then quits. PWR follows the
 hardware's hold semantics: a quick press or click is a short press; holding
 past 1.5 s emits the long-press edge (for a firmware's hold-release gesture).
-Ctrl-C stops `serve` cleanly.
+Bezel chrome renders at desktop density, so `--scale N` enlarges the screen
+without blowing up the controls. Ctrl-C stops `serve` cleanly.
 
 For BLE firmwares, `serve --ble-port N` additionally exposes the virtual BLE
 link as newline-delimited JSON on a localhost TCP socket: connecting acts as a
