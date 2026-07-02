@@ -198,6 +198,8 @@ static const std::string kSchema = std::string(R"JSON({
     { "name": "rotate", "description": "Set the IMU rotation quadrant (0-3).", "mutating": true, "stability": "stable",
       "args": [ { "name": "quadrant", "description": "0-3.", "type": "number", "required": true } ],
       "example": { "args": ["1", "--target", "agentgauge"], "stdin": "" } },
+    { "name": "motion", "description": "Inject one accelerometer wake nudge, consumed by the firmware's next motion poll. Requires a board with an IMU (has_imu).", "mutating": true, "stability": "stable",
+      "example": { "args": ["--target", "agentgauge"], "stdin": "" } },
     { "name": "gpio", "description": "Set a GPIO pin level (read back by digitalRead).", "mutating": true, "stability": "stable",
       "args": [
         { "name": "pin", "description": "GPIO number.", "type": "number", "required": true },
@@ -232,7 +234,7 @@ static const std::string kSchema = std::string(R"JSON({
     { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless.", "mutating": true, "stability": "stable",
       "args": [ { "name": "file", "description": "Scenario JSON path.", "type": "string", "required": true } ] },
     { "name": "serve", "description": "Boot and keep pumping so a live bridge can drive the device. HTTP: a bridge POSTs to the firmware's webserver (--port). BLE: --ble-port N exposes the virtual BLE link as newline-delimited JSON on a localhost TCP socket (connect = bonded central, lines in = host->device, device lines stream back; one client at a time). --window opens an interactive SDL window (mouse=touch, on-screen buttons + battery/USB/rotate controls). Human logs on stderr. On a qemu-backed target, serve only boots and pumps serial I/O until interrupted: there is no framebuffer, HTTP webserver, or native BLE link, so --shot, --window, and --ble-port are all rejected as unsupported (see the backend field on list-targets).", "mutating": true, "stability": "stable" },
-    { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), swipe (x1,y1,x2,y2), expect (text/absent/match), button, battery, rotate, gpio, wifi, ble (sub+data/passkey), snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
+    { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), swipe (x1,y1,x2,y2), expect (text/absent/match), button, battery, rotate, motion, gpio, wifi, ble (sub+data/passkey), snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
   ],
   "errors": [
     { "kind": "no_target", "description": "No --target and more than one target registered.", "exit_code": 2 },
@@ -593,7 +595,7 @@ int esprite_main(int argc, char** argv) {
     // resolving the target, so a typo'd command is reported as bad_args rather
     // than a misleading target error.
     static const char* kBootCommands[] = {"ui", "screenshot", "snapshot", "tap", "swipe", "button",
-                                          "battery", "rotate", "gpio", "wifi", "ble", "serial", "logs"};
+                                          "battery", "rotate", "motion", "gpio", "wifi", "ble", "serial", "logs"};
     bool known = false;
     for (auto* k : kBootCommands) if (cmd == k) { known = true; break; }
     if (!known)
@@ -706,6 +708,12 @@ int esprite_main(int argc, char** argv) {
         maybe_shot(argc, argv);
         emit("{\"ok\":true,\"quadrant\":" + std::to_string(sim_input().quadrant) + "}",
              "quadrant " + std::to_string(sim_input().quadrant));
+        return 0;
+    }
+    if (cmd == "motion") {
+        if (ActionError e = apply_motion()) return fail(e.kind, e.msg, kind_exit(e.kind));
+        maybe_shot(argc, argv);
+        emit("{\"ok\":true}", "motion nudge injected");
         return 0;
     }
     if (cmd == "gpio") {
@@ -975,6 +983,9 @@ int esprite_daemon(FILE* in, FILE* out) {
             else fprintf(out, "{\"ok\":true}\n");
         } else if (cmd == "rotate") {
             if (ActionError e = apply_rotate(doc["q"] | 0)) session_err(out, e.kind, e.msg);
+            else fprintf(out, "{\"ok\":true}\n");
+        } else if (cmd == "motion") {
+            if (ActionError e = apply_motion()) session_err(out, e.kind, e.msg);
             else fprintf(out, "{\"ok\":true}\n");
         } else if (cmd == "gpio") {
             if (ActionError e = apply_gpio(doc["pin"] | 0, doc["level"] | 0)) session_err(out, e.kind, e.msg);

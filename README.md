@@ -98,6 +98,7 @@ button primary|secondary|pwr [--shot OUT]   press a button; pwr-long / pwr-relea
                                  inject the power button's hold-gesture edges
 battery PCT [--charging] [--no-vbus] [--shot OUT]
 rotate 0..3 [--shot OUT]         set IMU rotation quadrant
+motion [--shot OUT]              inject one accelerometer wake nudge (needs an IMU board)
 gpio PIN LEVEL                   set a GPIO level
 ble connect|pair|disconnect|send|recv|hid   drive a BLE firmware's virtual link
                                  (connect [--passkey N], send '<json>', recv lines,

@@ -16,6 +16,8 @@ struct SimInput {
 
     int  quadrant = 0;                 // 0..3 rotation
 
+    bool motion_nudge = false;         // one-shot accelerometer wake nudge (agentgauge)
+
     std::deque<int> pwr_events;        // 1=press, 2=long, 3=release
 };
 

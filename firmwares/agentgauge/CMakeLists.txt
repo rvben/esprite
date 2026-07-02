@@ -25,6 +25,7 @@ set(AGENTGAUGE_SIM_SOURCES
     ui.cpp
     brightness.cpp
     idle.cpp
+    rotation.cpp
 )
 
 # Firmware sources deliberately NOT simulated: board.cpp does real I2C/PMU/IMU

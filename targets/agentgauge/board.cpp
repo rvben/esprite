@@ -17,7 +17,7 @@ static const SimButton kButtons[] = {
 
 static const BoardDesc kBoard = {
     "agentgauge", 480, 480,
-    false, true, false,          // has_rotation, has_battery, has_imu
+    false, true, true,           // has_rotation, has_battery, has_imu
     kButtons, 3,
 };
 

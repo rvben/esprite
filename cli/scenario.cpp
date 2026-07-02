@@ -127,6 +127,11 @@ int scenario_run(const std::string& path, const std::string& default_target) {
                 step_failed(e.kind, e.msg);
         } else if (!strcmp(cmd, "rotate")) {
             if (ActionError e = apply_rotate(step["q"] | 0)) step_failed(e.kind, e.msg);
+        } else if (!strcmp(cmd, "motion")) {
+            if (ActionError e = apply_motion()) step_failed(e.kind, e.msg);
+        } else if (!strcmp(cmd, "serial")) {
+            if (ActionError e = apply_serial_expect(step["expect"] | "", step["absent"] | ""))
+                step_failed(e.kind, e.msg);
         } else if (!strcmp(cmd, "gpio")) {
             if (ActionError e = apply_gpio(step["pin"] | 0, step["level"] | 0)) step_failed(e.kind, e.msg);
         } else if (!strcmp(cmd, "wifi")) {

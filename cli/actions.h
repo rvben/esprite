@@ -21,6 +21,17 @@ ActionError apply_swipe(int x1, int y1, int x2, int y2);   // moving press -> LV
 ActionError apply_gpio(int pin, int level);
 ActionError apply_wifi(const std::string& state);   // "up" or "down"
 
+// Inject one accelerometer wake nudge (consumed by the next board_motion_detected()
+// poll). 'unsupported' if the active board has no IMU (has_imu false).
+ActionError apply_motion();
+
+// Assert on captured serial output (native capture, same mechanics as the
+// one-shot/session "serial expect" commands): `text` (if non-empty) must
+// match, `absent` (if non-empty) must not. Mirrors apply_expect's shape so a
+// "no wake logged yet" check and a "wake logged" check use the same step.
+// Fails 'bad_args' for an invalid regex, 'expect_failed' on a mismatch.
+ActionError apply_serial_expect(const char* text, const char* absent);
+
 // Assert on the LVGL UI: `text` (if non-empty) must be present, `absent` (if
 // non-empty) must not be; `exact` chooses equals vs contains. Fails 'expect_failed'.
 ActionError apply_expect(const char* text, const char* absent, bool exact);

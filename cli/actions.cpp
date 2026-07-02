@@ -5,6 +5,12 @@
 #include "lvgl_snapshot.h"
 #include "Arduino.h"
 #include "WiFi.h"
+#include "Print.h"
+
+// Matches serial_settle()'s native-steps branch in cli.cpp for the "serial
+// expect" command; the scenario runner has no qemu backend to consider, so
+// there is only the one (native) case here.
+static const int SERIAL_SETTLE_STEPS = 60;
 
 const BoardDesc* active_board() {
     const SimTarget* t = sim_active_target();
@@ -61,6 +67,27 @@ ActionError apply_rotate(int quadrant) {
         return {"unsupported", "this board does not support rotation"};
     sim_input().quadrant = quadrant;
     sim_run_steps(5);
+    return {};
+}
+
+ActionError apply_motion() {
+    if (!active_board() || !active_board()->has_imu)
+        return {"unsupported", "this board has no IMU"};
+    sim_input().motion_nudge = true;
+    sim_run_steps(5);
+    return {};
+}
+
+ActionError apply_serial_expect(const char* text, const char* absent) {
+    if (text && *text && !sim_serial_regex_valid(text))
+        return {"bad_args", std::string("invalid regex '") + text + "'"};
+    if (absent && *absent && !sim_serial_regex_valid(absent))
+        return {"bad_args", std::string("invalid regex '") + absent + "'"};
+    sim_run_steps(SERIAL_SETTLE_STEPS);
+    if (text && *text && !sim_serial_contains(text))
+        return {"expect_failed", std::string("serial output does not match '") + text + "'"};
+    if (absent && *absent && sim_serial_contains(absent))
+        return {"expect_failed", std::string("serial output unexpectedly matches '") + absent + "'"};
     return {};
 }
 
