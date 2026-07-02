@@ -290,6 +290,16 @@ if(TARGET agentgauge_fw)
     link_sim_targets(sim_itests_ui)
 endif()
 
+# Gated QEMU emulator integration tests: drive QemuProcess/QmpClient directly
+# against real qemu-system-riscv32/-xtensa children. Always built (no target
+# gate needed, unlike the LVGL-firmware executables above), but every
+# TEST_CASE self-skips via MESSAGE + return when the QEMU env (.qemu/env.sh)
+# or fixture images (tests/fixtures/qemu/) are absent, so `make test` stays
+# green on a checkout that never ran `make qemu-fetch`/`qemu-fixtures`.
+add_executable(sim_itests_qemu tests/itest_main.cpp tests/itest_qemu.cpp)
+target_link_libraries(sim_itests_qemu PRIVATE cli_lib)
+link_sim_targets(sim_itests_qemu)
+
 enable_testing()
 add_test(NAME sim_tests COMMAND sim_tests)
 add_test(NAME sim_itests COMMAND sim_itests)
@@ -299,3 +309,4 @@ if(TARGET sim_itests_daemon)
     add_test(NAME sim_itests_scenario_expect COMMAND sim_itests_scenario_expect)
     add_test(NAME sim_itests_ui COMMAND sim_itests_ui)
 endif()
+add_test(NAME sim_itests_qemu COMMAND sim_itests_qemu)
