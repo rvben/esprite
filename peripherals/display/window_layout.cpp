@@ -114,9 +114,19 @@ WindowLayout window_layout(const BoardDesc* board, int scale) {
     return l;
 }
 
-WinRect layout_help_card(const WindowLayout& l) {
-    return WinRect{l.window.x + HELP_CARD_MARGIN, l.window.y + HELP_CARD_MARGIN,
-                    l.window.w - 2 * HELP_CARD_MARGIN, l.window.h - 2 * HELP_CARD_MARGIN};
+WinRect layout_help_card(const WindowLayout& l, int content_w, int content_h) {
+    int w = content_w + 2 * HELP_CARD_PAD;
+    int h = content_h + 2 * HELP_CARD_PAD;
+    // Clamp to fit fully inside the window (floor 0), same approach as
+    // layout_panel_card: content taller/wider than the window itself must
+    // never push the card off-window.
+    if (w > l.window.w) w = l.window.w;
+    if (h > l.window.h) h = l.window.h;
+    if (w < 0) w = 0;
+    if (h < 0) h = 0;
+    int x = l.window.x + (l.window.w - w) / 2;
+    int y = l.window.y + (l.window.h - h) / 2;
+    return WinRect{x, y, w, h};
 }
 
 WinRect layout_panel_card(const WindowLayout& l) {
@@ -150,7 +160,7 @@ PanelLayout layout_panel(const WindowLayout& l, bool battery, bool rotation) {
     int x = card.x + PANEL_PAD;
     if (battery) {
         p.bat_bar = WinRect{x, card.y + (PANEL_CARD_H - BAT_BAR_H) / 2, BAT_BAR_W, BAT_BAR_H};
-        x += BAT_BAR_W + PANEL_GAP;
+        x += BAT_BAR_W + PANEL_PCT_GAP;
         p.chg_btn = WinRect{x, card.y + (PANEL_CARD_H - PANEL_BTN_H) / 2, PANEL_BTN_W, PANEL_BTN_H};
         x += PANEL_BTN_W + PANEL_GAP;
         p.usb_btn = WinRect{x, card.y + (PANEL_CARD_H - PANEL_BTN_H) / 2, PANEL_BTN_W, PANEL_BTN_H};

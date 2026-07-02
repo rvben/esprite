@@ -31,14 +31,22 @@ inline constexpr int BAT_BAR_W     = 150;
 inline constexpr int BAT_BAR_H     = 22;
 inline constexpr int PANEL_BTN_W   = 56;
 inline constexpr int PANEL_BTN_H   = 34;
-inline constexpr int PANEL_CARD_W  = PANEL_PAD + BAT_BAR_W + PANEL_GAP + PANEL_BTN_W
+// Room reserved right of the battery bar for its "100%" readout, at the
+// panel's text scale (px=2 in the 5x7 font: 6 px advance per glyph). Mirrors
+// the old hardware-strip's `text_w("100%", 2) + 8` reservation so the percent
+// text has somewhere to live instead of being drawn over by chg_btn.
+inline constexpr int PANEL_PCT_W    = 4 /* strlen("100%") */ * 6 * 2;
+inline constexpr int PANEL_PCT_GAP  = PANEL_PCT_W + 8;
+
+inline constexpr int PANEL_CARD_W  = PANEL_PAD + BAT_BAR_W + PANEL_PCT_GAP + PANEL_BTN_W
                                     + PANEL_GAP + PANEL_BTN_W + PANEL_GAP + PANEL_BTN_W
                                     + PANEL_PAD;
 inline constexpr int PANEL_CARD_H  = PANEL_PAD + PANEL_BTN_H + PANEL_PAD;
 
-// Help card: a centered overlay, inset from the window by a fixed margin on
-// every side (no board-specific sizing - it is prose, not controls).
-inline constexpr int HELP_CARD_MARGIN = 40;
+// Help card: a centered overlay sized to its content (text block width/height
+// in points, supplied by the caller - the layout module doesn't know button
+// labels or line counts) plus this padding on every side.
+inline constexpr int HELP_CARD_PAD = 16;
 
 struct WinRect { int x, y, w, h; };
 bool win_rect_contains(const WinRect& r, int x, int y);
@@ -75,7 +83,12 @@ struct WindowLayout {
 WindowLayout window_layout(const BoardDesc* board, int scale);
 
 // Overlay geometry, in the same window-absolute coordinates as WindowLayout:
-WinRect layout_help_card(const WindowLayout& l);
+// content_w/content_h are the help text block's extent in points (the caller
+// measures its own lines - this module has no notion of button labels or
+// font metrics). The card is content + 2*HELP_CARD_PAD, centered in the
+// window, and clamped to fit fully inside it even if the content is larger
+// than the window itself.
+WinRect layout_help_card(const WindowLayout& l, int content_w, int content_h);
 // Bottom-right, anchored PANEL_MARGIN off the window's own edges. Sized at
 // PANEL_CARD_W x PANEL_CARD_H unless the window is too small to hold that -
 // then each dimension shrinks to fit (floor 0), so the card always nests
@@ -84,7 +97,9 @@ WinRect layout_panel_card(const WindowLayout& l);
 
 struct PanelLayout { WinRect bat_bar, chg_btn, usb_btn, rot_btn; };
 // Positions the controls the board actually has inside the fixed-size panel
-// card, left to right with PANEL_GAP between them: battery contributes
-// bat_bar + chg_btn + usb_btn, rotation contributes rot_btn. A control the
+// card, left to right with PANEL_GAP between them - except between bat_bar
+// and chg_btn, which are separated by PANEL_PCT_GAP instead, reserving room
+// for the battery percent readout so it isn't drawn over by chg_btn. Battery
+// contributes bat_bar + chg_btn + usb_btn, rotation contributes rot_btn. A control the
 // board lacks comes back as a zero rect ({0,0,0,0}) and reserves no space.
 PanelLayout layout_panel(const WindowLayout& l, bool battery, bool rotation);

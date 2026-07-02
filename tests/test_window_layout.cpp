@@ -254,16 +254,34 @@ TEST_CASE("more_nub sits in the bottom-right bezel corner, outside the screen") 
     CHECK_FALSE(rects_overlap(none.more_nub, none.screen));
 }
 
-TEST_CASE("help card is centered and nested inside the window") {
+TEST_CASE("help card is content-sized (content + 2*pad) and centered in the window") {
     WindowLayout l = window_layout(&kThreeRightBoard, 1);
-    WinRect help = layout_help_card(l);
-    CHECK(help.x > l.window.x);
-    CHECK(help.y > l.window.y);
-    CHECK(help.x + help.w < l.window.x + l.window.w);
-    CHECK(help.y + help.h < l.window.y + l.window.h);
-    // Centered: equal margin left/right and top/bottom.
-    CHECK(help.x - l.window.x == l.window.x + l.window.w - (help.x + help.w));
-    CHECK(help.y - l.window.y == l.window.y + l.window.h - (help.y + help.h));
+    WinRect help = layout_help_card(l, 120, 80);
+    CHECK(help.w == 120 + 2 * HELP_CARD_PAD);
+    CHECK(help.h == 80 + 2 * HELP_CARD_PAD);
+    CHECK(help.x + help.w <= l.window.x + l.window.w);
+    CHECK(help.y + help.h <= l.window.y + l.window.h);
+    CHECK(help.x >= l.window.x);
+    CHECK(help.y >= l.window.y);
+    // Centered within +-1 px: equal margin left/right and top/bottom (integer
+    // division on an odd leftover pixel is the only source of imprecision).
+    int left_margin   = help.x - l.window.x;
+    int right_margin  = l.window.x + l.window.w - (help.x + help.w);
+    int top_margin    = help.y - l.window.y;
+    int bottom_margin = l.window.y + l.window.h - (help.y + help.h);
+    CHECK(std::abs(left_margin - right_margin) <= 1);
+    CHECK(std::abs(top_margin - bottom_margin) <= 1);
+}
+
+TEST_CASE("help card clamps to the window even when content exceeds it, staying nested") {
+    WindowLayout l = window_layout(&kTinyBoard, 1);   // 20x20 board, tiny window
+    WinRect help = layout_help_card(l, 2000, 2000);   // content far larger than any window
+    CHECK(help.x >= l.window.x);
+    CHECK(help.y >= l.window.y);
+    CHECK(help.x + help.w <= l.window.x + l.window.w);
+    CHECK(help.y + help.h <= l.window.y + l.window.h);
+    CHECK(help.w <= l.window.w);
+    CHECK(help.h <= l.window.h);
 }
 
 TEST_CASE("panel card sits bottom-right, nested inside the window, avoiding the top-left origin") {
@@ -295,12 +313,18 @@ TEST_CASE("layout_panel includes only the controls the board has") {
     CHECK(both.chg_btn.w == PANEL_BTN_W);
     CHECK(both.usb_btn.w == PANEL_BTN_W);
     CHECK(both.rot_btn.w == PANEL_BTN_W);
-    // Left to right, each nested in the card, gapped by PANEL_GAP.
+    // Left to right, each nested in the card. The bar-to-chg gap reserves
+    // PANEL_PCT_GAP (room for the "100%" readout, not just PANEL_GAP) so the
+    // percent text has somewhere to live instead of being drawn over by
+    // chg_btn; every other pair is gapped by PANEL_GAP.
     CHECK(both.bat_bar.x >= card.x);
-    CHECK(both.chg_btn.x == both.bat_bar.x + both.bat_bar.w + PANEL_GAP);
+    CHECK(both.chg_btn.x == both.bat_bar.x + both.bat_bar.w + PANEL_PCT_GAP);
     CHECK(both.usb_btn.x == both.chg_btn.x + both.chg_btn.w + PANEL_GAP);
     CHECK(both.rot_btn.x == both.usb_btn.x + both.usb_btn.w + PANEL_GAP);
     CHECK(both.rot_btn.x + both.rot_btn.w <= card.x + card.w);
+    // The reserved gap is strictly wider than a plain PANEL_GAP: it must
+    // actually hold "100%" at the panel's text scale, not just be present.
+    CHECK(PANEL_PCT_GAP > PANEL_GAP);
 
     PanelLayout neither = layout_panel(l, false, false);
     CHECK(neither.bat_bar.w == 0);
