@@ -6,6 +6,7 @@
 #include "screenshot.h"
 #include "scenario.h"
 #include "sim_input.h"
+#include "sim_ble.h"
 #include "Print.h"
 #include "WebServer.h"
 #include "lvgl_snapshot.h"
@@ -90,9 +91,6 @@ static const std::string kSchema = std::string(R"JSON({
         { "name": "x", "description": "Resolved x.", "type": "number" },
         { "name": "y", "description": "Resolved y.", "type": "number" }
       ] },
-    { "name": "button", "description": "Press a physical button.", "mutating": true, "stability": "stable",
-      "args": [ { "name": "which", "description": "Button to press.", "type": "string", "required": true, "enum": ["primary", "secondary", "pwr"] } ],
-      "example": { "args": ["primary", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
     { "name": "battery", "description": "Set battery level; --charging and --no-vbus set the flags.", "mutating": true, "stability": "stable",
       "args": [ { "name": "pct", "description": "0-100.", "type": "number", "required": true } ],
       "example": { "args": ["50", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
@@ -105,6 +103,15 @@ static const std::string kSchema = std::string(R"JSON({
         { "name": "level", "description": "0 or 1.", "type": "number", "required": true }
       ],
       "example": { "args": ["9", "1", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
+    { "name": "ble", "description": "Drive the virtual BLE link of a BLE firmware (e.g. the Clawdmeter Hardware Buddy), standing in for the desktop app: connect (bonded, or --passkey N to pair; confirm with ble pair), disconnect, send one JSON line, recv device-sent lines, hid captured keyboard reports.", "mutating": true, "stability": "stable",
+      "args": [
+        { "name": "sub", "description": "connect|pair|disconnect|send|recv|hid.", "type": "string", "required": true, "enum": ["connect", "pair", "disconnect", "send", "recv", "hid"] },
+        { "name": "json", "description": "For send: one JSON line for the device.", "type": "string", "required": false }
+      ],
+      "example": { "args": ["send", "{\"tokens_today\":4567}", "--target", "waveshare_amoled_216_c6_buddy"], "stdin": "" } },
+    { "name": "button", "description": "Press a physical button. pwr-long and pwr-release inject the power button's long-press and release edges for hold gestures (advance time with steps between them).", "mutating": true, "stability": "stable",
+      "args": [ { "name": "which", "description": "primary|secondary|pwr|pwr-long|pwr-release.", "type": "string", "required": true, "enum": ["primary", "secondary", "pwr", "pwr-long", "pwr-release"] } ],
+      "example": { "args": ["primary", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
     { "name": "serial", "description": "serial send TEXT feeds device input; serial expect REGEX matches captured output (exit 1 on no match).", "mutating": false, "stability": "stable",
       "args": [
         { "name": "sub", "description": "send or expect.", "type": "string", "required": true, "enum": ["send", "expect"] },
@@ -117,7 +124,7 @@ static const std::string kSchema = std::string(R"JSON({
     { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless.", "mutating": true, "stability": "stable",
       "args": [ { "name": "file", "description": "Scenario JSON path.", "type": "string", "required": true } ] },
     { "name": "serve", "description": "Boot and keep pumping so a live bridge can POST; --window opens an interactive SDL window (mouse=touch, on-screen buttons + battery/USB/rotate controls). Human logs on stderr.", "mutating": true, "stability": "stable" },
-    { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), button, battery, rotate, gpio, snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
+    { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), button, battery, rotate, gpio, ble (sub+data/passkey), snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
   ],
   "errors": [
     { "kind": "no_target", "description": "No --target and more than one target registered.", "exit_code": 2 },
@@ -136,6 +143,7 @@ static const std::string kSchema = std::string(R"JSON({
 // positionals (serial send text, for example) can themselves start with dashes.
 static const char* kValOpts[]  = {"--target", "--steps", "--path", "--shot",
                                   "--port", "--interval-ms", "--scale", "--ref",
+                                  "--passkey",
                                   "--output", "-o", "--limit", "--offset", "--fields"};
 static const char* kFlagOpts[] = {"--charging", "--no-vbus", "--window", "--json", "--help", "--version"};
 
@@ -187,6 +195,7 @@ static int validate_options(int argc, char** argv) {
     static const struct { const char* name; long min, max; } kNumericOpts[] = {
         {"--steps", 0, 1000000}, {"--port", 0, 65535}, {"--interval-ms", 1, 3600000},
         {"--scale", 1, 16}, {"--limit", 0, 1000000}, {"--offset", 0, 1000000},
+        {"--passkey", 1, 999999},
     };
     for (int i = 2; i < argc; ++i) {
         const char* a = argv[i];
@@ -409,7 +418,7 @@ int esprite_main(int argc, char** argv) {
     // resolving the target, so a typo'd command is reported as bad_args rather
     // than a misleading target error.
     static const char* kBootCommands[] = {"ui", "screenshot", "snapshot", "tap", "button",
-                                          "battery", "rotate", "gpio", "serial", "logs"};
+                                          "battery", "rotate", "gpio", "ble", "serial", "logs"};
     bool known = false;
     for (auto* k : kBootCommands) if (cmd == k) { known = true; break; }
     if (!known)
@@ -513,6 +522,70 @@ int esprite_main(int argc, char** argv) {
         emit("{\"ok\":true,\"pin\":" + std::to_string(pin) + ",\"level\":" + std::to_string(lvl ? 1 : 0) + "}",
              "gpio " + std::to_string(pin) + "=" + std::to_string(lvl ? 1 : 0));
         return 0;
+    }
+    if (cmd == "ble") {
+        std::string sub = positional(argc, argv, 0);
+        if (sub == "connect") {
+            long pk = 0;
+            if (const char* p = opt_val(argc, argv, "--passkey")) to_long(p, 1, 999999, &pk);
+            if (ActionError e = apply_ble_connect((unsigned)pk)) return fail(e.kind, e.msg, kind_exit(e.kind));
+            emit(std::string("{\"ok\":true,\"secure\":") + jbool(sim_ble_secure()) +
+                 ",\"passkey\":" + std::to_string(sim_ble_passkey()) + "}",
+                 sim_ble_secure() ? "connected (bonded)" : "connected, pairing");
+            return 0;
+        }
+        if (sub == "pair") {
+            if (ActionError e = apply_ble_pair()) return fail(e.kind, e.msg, kind_exit(e.kind));
+            emit("{\"ok\":true,\"secure\":true}", "paired");
+            return 0;
+        }
+        if (sub == "disconnect") {
+            if (ActionError e = apply_ble_disconnect()) return fail(e.kind, e.msg, kind_exit(e.kind));
+            emit("{\"ok\":true}", "disconnected");
+            return 0;
+        }
+        if (sub == "send") {
+            std::string line = positional(argc, argv, 1);
+            JsonDocument probe;
+            if (line.empty() || deserializeJson(probe, line))
+                return fail("bad_args", "ble send needs a valid JSON line", 2);
+            if (ActionError e = apply_ble_send(line)) return fail(e.kind, e.msg, kind_exit(e.kind));
+            emit("{\"ok\":true}", "sent");
+            return 0;
+        }
+        if (sub == "recv") {
+            if (ActionError e = ble_guarded()) return fail(e.kind, e.msg, kind_exit(e.kind));
+            std::string items = "[", text;
+            bool first = true;
+            for (const std::string& l : sim_ble_host_drain()) {
+                JsonDocument probe;   // firmware lines are JSON; quote any that are not
+                items += (first ? "" : ",");
+                items += deserializeJson(probe, l) ? "\"" + json_esc(l) + "\"" : l;
+                first = false;
+                text += l + "\n";
+            }
+            items += "]";
+            emit("{\"items\":" + items + "}", text.empty() ? "(no lines)" : text);
+            return 0;
+        }
+        if (sub == "hid") {
+            if (ActionError e = ble_guarded()) return fail(e.kind, e.msg, kind_exit(e.kind));
+            std::string items = "[", text;
+            bool first = true;
+            for (const SimBleHidEvent& ev : sim_ble_hid_drain()) {
+                items += (first ? "" : ",");
+                items += std::string("{\"press\":") + jbool(ev.press) +
+                         ",\"key\":" + std::to_string(ev.key) +
+                         ",\"modifier\":" + std::to_string(ev.modifier) + "}";
+                first = false;
+                text += std::string(ev.press ? "press" : "release") + " key=" +
+                        std::to_string(ev.key) + " mod=" + std::to_string(ev.modifier) + "\n";
+            }
+            items += "]";
+            emit("{\"items\":" + items + "}", text.empty() ? "(no hid events)" : text);
+            return 0;
+        }
+        return fail("bad_args", "ble takes connect|pair|disconnect|send|recv|hid", 2);
     }
     if (cmd == "serial") {
         std::string sub = positional(argc, argv, 0), arg = positional(argc, argv, 1);
@@ -631,6 +704,45 @@ int esprite_daemon(FILE* in, FILE* out) {
             else session_err(out, "post_failed", "snapshot not delivered (target server unbound/unreachable or body too large)");
         } else if (cmd == "steps") {
             sim_run_steps(doc["n"] | 10); fprintf(out, "{\"ok\":true}\n");
+        } else if (cmd == "ble") {
+            std::string sub = doc["sub"] | "";
+            ActionError e;
+            if (sub == "connect")         e = apply_ble_connect(doc["passkey"] | 0u);
+            else if (sub == "pair")       e = apply_ble_pair();
+            else if (sub == "disconnect") e = apply_ble_disconnect();
+            else if (sub == "send") {
+                std::string body; serializeJson(doc["data"], body);
+                e = (body.empty() || body == "null")
+                        ? ActionError{"bad_args", "ble send needs a data object"}
+                        : apply_ble_send(body);
+            } else if (sub == "recv" || sub == "hid") {
+                e = ble_guarded();
+                if (!e) {
+                    std::string items = "[";
+                    bool first = true;
+                    if (sub == "recv") {
+                        for (const std::string& l : sim_ble_host_drain()) {
+                            JsonDocument probe;
+                            items += (first ? "" : ",");
+                            items += deserializeJson(probe, l) ? "\"" + json_esc(l) + "\"" : l;
+                            first = false;
+                        }
+                    } else {
+                        for (const SimBleHidEvent& ev : sim_ble_hid_drain()) {
+                            items += (first ? "" : ",");
+                            items += std::string("{\"press\":") + jbool(ev.press) +
+                                     ",\"key\":" + std::to_string(ev.key) +
+                                     ",\"modifier\":" + std::to_string(ev.modifier) + "}";
+                            first = false;
+                        }
+                    }
+                    fprintf(out, "{\"items\":%s]}\n", items.c_str());
+                }
+            } else {
+                e = {"bad_args", "ble takes sub connect|pair|disconnect|send|recv|hid"};
+            }
+            if (e) session_err(out, e.kind, e.msg);
+            else if (sub != "recv" && sub != "hid") fprintf(out, "{\"ok\":true}\n");
         } else if (cmd == "serial") {
             std::string sub = doc["sub"] | "";
             if (sub == "send") {

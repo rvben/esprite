@@ -120,6 +120,19 @@ int scenario_run(const std::string& path, const std::string& default_target) {
             if (ActionError e = apply_rotate(step["q"] | 0)) step_failed(e.kind, e.msg);
         } else if (!strcmp(cmd, "gpio")) {
             if (ActionError e = apply_gpio(step["pin"] | 0, step["level"] | 0)) step_failed(e.kind, e.msg);
+        } else if (!strcmp(cmd, "ble")) {
+            const char* sub = step["sub"] | "";
+            ActionError e;
+            if (!strcmp(sub, "connect"))         e = apply_ble_connect(step["passkey"] | 0u);
+            else if (!strcmp(sub, "pair"))       e = apply_ble_pair();
+            else if (!strcmp(sub, "disconnect")) e = apply_ble_disconnect();
+            else if (!strcmp(sub, "send")) {
+                std::string body; serializeJson(step["data"], body);
+                e = (body.empty() || body == "null")
+                        ? ActionError{"bad_args", "ble send step needs a data object"}
+                        : apply_ble_send(body);
+            } else e = {"bad_args", std::string("unknown ble sub '") + sub + "'"};
+            if (e) step_failed(e.kind, e.msg);
         } else {
             step_failed("bad_args", std::string("unknown step cmd '") + cmd + "'");
         }

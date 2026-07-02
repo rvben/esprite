@@ -13,11 +13,19 @@ struct ActionError {
     explicit operator bool() const { return kind != nullptr; }
 };
 
-ActionError apply_button(const std::string& which);                      // primary|secondary|pwr
+ActionError apply_button(const std::string& which);   // primary|secondary|pwr|pwr-long|pwr-release
 ActionError apply_battery(int pct, const bool* charging, const bool* vbus);
 ActionError apply_rotate(int quadrant);
 ActionError apply_tap(int x, int y);
 ActionError apply_gpio(int pin, int level);
+
+// BLE link actions (the CLI stands in for the Claude desktop app). All reject
+// with 'unsupported' when the booted firmware never attached a BLE stack.
+ActionError apply_ble_connect(unsigned passkey);   // 0 = bonded fast path
+ActionError apply_ble_pair();                      // confirm a pending passkey
+ActionError apply_ble_disconnect();
+ActionError apply_ble_send(const std::string& line);
+ActionError ble_guarded();                         // ok iff BLE is available
 
 // The active board's hardware description (set once a target is booted), and
 // whether it has a physical control with the given action.

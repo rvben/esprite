@@ -48,12 +48,14 @@ add_library(peripherals STATIC
     peripherals/display/framebuffer.cpp
     peripherals/display/screenshot.cpp
     peripherals/input/sim_input.cpp
+    peripherals/ble/sim_ble.cpp
     peripherals/gfx/arduino_gfx.cpp
     peripherals/tft_espi/tft_espi.cpp
 )
 target_include_directories(peripherals PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/display
     ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/input
+    ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/ble
     ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/gfx
     ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/tft_espi)
 target_link_libraries(peripherals PUBLIC third_party)
@@ -179,7 +181,7 @@ endforeach()
 
 # Onboarded targets: board variants (which run a shared firmware) and standalone
 # apps. Each provides its own CMakeLists via add_subdirectory.
-foreach(_t waveshare_amoled_216_c6 waveshare_amoled_18 sample_gfx cyd cyd_tft)
+foreach(_t waveshare_amoled_216_c6 waveshare_amoled_216_c6_buddy waveshare_amoled_18 sample_gfx cyd cyd_tft)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/targets/${_t}/CMakeLists.txt)
         add_subdirectory(targets/${_t})
     endif()
@@ -210,6 +212,7 @@ add_executable(sim_tests
     tests/test_prefs.cpp
     tests/test_webserver.cpp
     tests/test_wifimanager.cpp
+    tests/test_ble.cpp
     tests/test_framebuffer.cpp
     tests/test_screenshot.cpp
     tests/test_target.cpp
@@ -262,6 +265,14 @@ if(TARGET clawdmeter_fw)
     link_sim_targets(sim_itests_ui)
 endif()
 
+# The BLE Hardware Buddy flavor end to end (pairing, heartbeats, prompts, HID,
+# the hold-to-pair gesture). Own executable: one LVGL boot per process.
+if(TARGET clawdmeter_buddy)
+    add_executable(sim_itests_buddy tests/itest_main.cpp tests/itest_buddy.cpp)
+    target_link_libraries(sim_itests_buddy PRIVATE cli_lib)
+    link_sim_targets(sim_itests_buddy)
+endif()
+
 enable_testing()
 add_test(NAME sim_tests COMMAND sim_tests)
 add_test(NAME sim_itests COMMAND sim_itests)
@@ -272,4 +283,7 @@ if(TARGET sim_itests_daemon)
     add_test(NAME sim_itests_daemon COMMAND sim_itests_daemon)
     add_test(NAME sim_itests_scenario COMMAND sim_itests_scenario)
     add_test(NAME sim_itests_ui COMMAND sim_itests_ui)
+endif()
+if(TARGET sim_itests_buddy)
+    add_test(NAME sim_itests_buddy COMMAND sim_itests_buddy)
 endif()

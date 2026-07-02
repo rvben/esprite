@@ -46,6 +46,25 @@ TEST_CASE("every documented error kind fires with its schema exit code") {
     CHECK(err.find("\"kind\":\"unsupported\"") != std::string::npos);
 }
 
+TEST_CASE("ble commands reject targets whose firmware has no BLE") {
+    // cyd runs a plain GFX sketch: no BLE stack ever attaches, so the whole
+    // ble surface is 'unsupported' (exit 7), like battery on a battery-less
+    // board. A bogus subcommand is a usage error.
+    std::string err;
+    CHECK(run_cli_err({"esprite", "ble", "connect", "--target", "cyd"}, &err) == 7);
+    CHECK(err.find("\"kind\":\"unsupported\"") != std::string::npos);
+    CHECK(run_cli({"esprite", "ble", "send", "{\"a\":1}", "--target", "cyd"}) == 7);
+    CHECK(run_cli({"esprite", "ble", "recv", "--target", "cyd"}) == 7);
+    CHECK(run_cli({"esprite", "ble", "bogus", "--target", "cyd"}) == 2);
+}
+
+TEST_CASE("pwr long-press and release are injectable like a short press") {
+    // sample_gfx has no PWR control, so all three reject with unsupported;
+    // previously the long/release forms did not exist at all (bad_args).
+    CHECK(run_cli({"esprite", "button", "pwr-long", "--target", "sample_gfx"}) == 7);
+    CHECK(run_cli({"esprite", "button", "pwr-release", "--target", "sample_gfx"}) == 7);
+}
+
 TEST_CASE("gpio injection is readable through the Arduino API after the command") {
     CHECK(run_cli({"esprite", "gpio", "5", "1", "--target", "cyd"}) == 0);
     CHECK(digitalRead(5) == 1);

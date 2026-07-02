@@ -78,10 +78,14 @@ ui                               snapshot the LVGL widget tree (refs for tap --r
 screenshot OUT.png [--steps N]   boot, run, write a PNG
 snapshot '<json>' [--path P] [--shot OUT]   POST to the device webserver
 tap X Y | tap --ref eN [--shot OUT]         inject a touch
-button primary|secondary|pwr [--shot OUT]   press a button
+button primary|secondary|pwr [--shot OUT]   press a button; pwr-long / pwr-release
+                                 inject the power button's hold-gesture edges
 battery PCT [--charging] [--no-vbus] [--shot OUT]
 rotate 0..3 [--shot OUT]         set IMU rotation quadrant
 gpio PIN LEVEL                   set a GPIO level
+ble connect|pair|disconnect|send|recv|hid   drive a BLE firmware's virtual link
+                                 (connect [--passkey N], send '<json>', recv lines,
+                                 hid captured keyboard reports)
 serial send 'TEXT'               feed the device serial input
 serial expect 'REGEX'            match against captured serial output
 logs                             print captured serial output
@@ -189,11 +193,13 @@ targets coexist in one binary; see the target CMakeLists for the two-line rule.
 
 **Faithful:** application logic, UI rendering (fonts, icons, animations,
 responsive layout), screen and state machines, the app's real data-parsing paths
-(for example its HTTP handlers), GPIO and peripheral behavior at the API level,
-and NVS persistence.
+(its HTTP handlers, and its BLE line protocol: the Clawdmeter buddy flavor runs
+the real protocol parser, permission flow, and HID mapping against a virtual
+link), GPIO and peripheral behavior at the API level, and NVS persistence.
 
 **Approximated, not faithful:** virtual time rather than RTOS scheduling; instant
-faked Wi-Fi with no real radio; no QSPI or panel electrical quirks; no PSRAM
+faked Wi-Fi and BLE with no real radio (no MTU fragmentation, advertising
+intervals, or bonding storage); no QSPI or panel electrical quirks; no PSRAM
 exhaustion; audio is silent.
 
 This is not a substitute for on-hardware QA of timing, radio, or panel behavior.

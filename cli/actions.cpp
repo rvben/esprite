@@ -1,6 +1,7 @@
 #include "actions.h"
 #include "runtime.h"
 #include "sim_input.h"
+#include "sim_ble.h"
 #include "Arduino.h"
 
 const BoardDesc* active_board() {
@@ -17,14 +18,20 @@ bool board_has_action(SimInputAction act) {
 }
 
 ActionError apply_button(const std::string& which) {
-    if (which != "primary" && which != "secondary" && which != "pwr")
-        return {"bad_args", "button takes primary|secondary|pwr"};
-    SimInputAction act = (which == "pwr")       ? ACT_PWR
+    // The PWR control has three injectable edges, matching the power HAL:
+    // press (1), long-press (2), and release (3). Long-press + release drive
+    // hold gestures (e.g. Clawdmeter's hold-to-pair) with `steps` in between.
+    int pwr_event = (which == "pwr")         ? 1
+                  : (which == "pwr-long")    ? 2
+                  : (which == "pwr-release") ? 3 : 0;
+    if (pwr_event == 0 && which != "primary" && which != "secondary")
+        return {"bad_args", "button takes primary|secondary|pwr|pwr-long|pwr-release"};
+    SimInputAction act = pwr_event              ? ACT_PWR
                        : (which == "secondary") ? ACT_SECONDARY
                                                 : ACT_PRIMARY;
     if (!board_has_action(act))
         return {"unsupported", "this board has no '" + which + "' button"};
-    if (which == "pwr") { sim_input().pwr_events.push_back(1); sim_run_steps(5); }
+    if (pwr_event) { sim_input().pwr_events.push_back(pwr_event); sim_run_steps(5); }
     else {
         int idx = (which == "secondary") ? 1 : 0;
         sim_input().button[idx] = true;  sim_run_steps(5);
@@ -74,5 +81,43 @@ ActionError apply_gpio(int pin, int level) {
         return {"bad_args", "gpio needs a pin 0-63 and a level 0|1"};
     sim_gpio_set(pin, level);
     sim_run_steps(5);
+    return {};
+}
+
+ActionError ble_guarded() {
+    if (!sim_ble_available())
+        return {"unsupported", "this firmware has no BLE (boot a buddy target)"};
+    return {};
+}
+
+ActionError apply_ble_connect(unsigned passkey) {
+    if (ActionError e = ble_guarded()) return e;
+    sim_ble_host_connect(passkey);
+    sim_settle_ms();   // let the firmware notice the link and update its UI
+    return {};
+}
+
+ActionError apply_ble_pair() {
+    if (ActionError e = ble_guarded()) return e;
+    if (sim_ble_passkey() == 0)
+        return {"bad_args", "no pairing in progress (ble connect --passkey N first)"};
+    sim_ble_host_confirm_pairing();
+    sim_settle_ms();
+    return {};
+}
+
+ActionError apply_ble_disconnect() {
+    if (ActionError e = ble_guarded()) return e;
+    sim_ble_host_disconnect();
+    sim_settle_ms();
+    return {};
+}
+
+ActionError apply_ble_send(const std::string& line) {
+    if (ActionError e = ble_guarded()) return e;
+    if (sim_ble_link_state() != SIM_BLE_CONNECTED)
+        return {"post_failed", "no BLE connection (ble connect first)"};
+    sim_ble_host_send(line);
+    sim_settle_ms();   // let the firmware drain and render the line
     return {};
 }

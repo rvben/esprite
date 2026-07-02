@@ -25,17 +25,23 @@ set(CLAWDMETER_SIM_SOURCES
     splash.cpp
     idle.cpp
     usage_rate.cpp
-    limits_projection.cpp
     brightness.cpp
 )
 
-# Firmware sources deliberately NOT simulated (no BLE/audio shims; the sim's
-# data path is HTTP). A new firmware file belongs in exactly one of these lists.
-set(CLAWDMETER_UNSIMULATED_SOURCES
+# The BLE Hardware Buddy transport, compiled into the separate clawdmeter_buddy
+# flavor below (main.cpp is recompiled there with app_wifi swapped for these).
+set(CLAWDMETER_BUDDY_SOURCES
     app_buddy.cpp
+    protocol.cpp
+)
+
+# Firmware sources deliberately NOT simulated: the NimBLE radio stack (the sim
+# binds the firmware's own ble.h to a virtual link instead) and the audio
+# codec path (sound_hal is adapted directly). A new firmware file belongs in
+# exactly one of these three lists.
+set(CLAWDMETER_UNSIMULATED_SOURCES
     ble.cpp
     chime.cpp
-    protocol.cpp
     es8311.c
 )
 
@@ -43,10 +49,11 @@ file(GLOB _cm_present CONFIGURE_DEPENDS ${CM}/*.cpp ${CM}/*.c)
 foreach(_f ${_cm_present})
     get_filename_component(_name ${_f} NAME)
     if(NOT _name IN_LIST CLAWDMETER_SIM_SOURCES
+       AND NOT _name IN_LIST CLAWDMETER_BUDDY_SOURCES
        AND NOT _name IN_LIST CLAWDMETER_UNSIMULATED_SOURCES
        AND NOT _name MATCHES "^font_.*\\.c$")
-        message(WARNING "Clawdmeter gained ${_name}; add it to CLAWDMETER_SIM_SOURCES "
-                        "(links against the shims) or CLAWDMETER_UNSIMULATED_SOURCES "
+        message(WARNING "Clawdmeter gained ${_name}; add it to CLAWDMETER_SIM_SOURCES, "
+                        "CLAWDMETER_BUDDY_SOURCES, or CLAWDMETER_UNSIMULATED_SOURCES "
                         "in firmwares/clawdmeter/CMakeLists.txt")
     endif()
 endforeach()
@@ -102,3 +109,8 @@ target_include_directories(clawdmeter_fw PUBLIC
     ${CM}
     ${CMAKE_CURRENT_LIST_DIR}/board_sim)
 target_link_libraries(clawdmeter_fw PUBLIC core peripherals lvgl_glue ArduinoJson)
+
+# The BLE Hardware Buddy flavor lives in its own directory scope: main.cpp is
+# compiled a second time with renamed entry points, and source properties are
+# directory-scoped, so the wifi and buddy renames must not share a directory.
+add_subdirectory(buddy)
