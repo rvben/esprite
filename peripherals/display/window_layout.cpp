@@ -116,9 +116,15 @@ WinRect layout_help_card(const WindowLayout& l) {
 }
 
 WinRect layout_panel_card(const WindowLayout& l) {
-    return WinRect{l.window.x + l.window.w - PANEL_MARGIN - PANEL_CARD_W,
-                    l.window.y + l.window.h - PANEL_MARGIN - PANEL_CARD_H,
-                    PANEL_CARD_W, PANEL_CARD_H};
+    // Anchored PANEL_MARGIN off the bottom-right corner, but never past the
+    // window's own top-left: a narrow board's window can be only a few
+    // pixels wider than the (fixed-size) card, and PANEL_MARGIN would
+    // otherwise push it off the left/top edge (e.g. sample_gfx at scale 1).
+    int x = l.window.x + l.window.w - PANEL_MARGIN - PANEL_CARD_W;
+    int y = l.window.y + l.window.h - PANEL_MARGIN - PANEL_CARD_H;
+    if (x < l.window.x) x = l.window.x;
+    if (y < l.window.y) y = l.window.y;
+    return WinRect{x, y, PANEL_CARD_W, PANEL_CARD_H};
 }
 
 PanelLayout layout_panel(const WindowLayout& l, bool battery, bool rotation) {

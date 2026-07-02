@@ -275,3 +275,17 @@ TEST_CASE("sample_gfx (real zero-button target) gets a bare-screen layout") {
     CHECK(l.screen.x == BEZEL_MARGIN);
     CHECK(l.screen.y == BEZEL_MARGIN);
 }
+
+TEST_CASE("panel card stays nested inside the window even for a narrow real board") {
+    // sample_gfx at scale 1 (320x240, no buttons) makes window.w (372) only
+    // 6px wider than PANEL_CARD_W + PANEL_MARGIN (378): a regression case
+    // where the naive bottom-right anchor would push the card off-window.
+    const SimTarget* t = sim_target("sample_gfx");
+    REQUIRE(t != nullptr);
+    WindowLayout l = window_layout(t->board, 1);
+    WinRect panel = layout_panel_card(l);
+    CHECK(panel.x >= l.window.x);
+    CHECK(panel.y >= l.window.y);
+    CHECK(panel.x + panel.w <= l.window.x + l.window.w);
+    CHECK(panel.y + panel.h <= l.window.y + l.window.h);
+}
