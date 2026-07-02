@@ -16,3 +16,7 @@ CLAUDE.local.md
 # Internal planning specs (not for the public repo)
 docs/plans/
 docs/specs/
+
+# Downloaded prebuilt QEMU binaries and QEMU test fixtures (not committed)
+.qemu/
+tests/fixtures/qemu/

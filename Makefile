@@ -11,7 +11,7 @@ ifdef AGENTGAUGE_SRC
 CMAKE_ARGS += -DAGENTGAUGE_SRC=$(AGENTGAUGE_SRC)
 endif
 
-.PHONY: configure build test screenshot scenario goldens release install dist clean
+.PHONY: configure build test screenshot scenario goldens release install dist clean qemu-fetch
 
 configure:
 	cmake -S . -B $(BUILD) $(CMAKE_ARGS)
@@ -61,3 +61,8 @@ goldens: build
 
 clean:
 	rm -rf $(BUILD) $(RELEASE)
+
+# Download prebuilt Espressif QEMU (qemu-system-riscv32, qemu-system-xtensa)
+# into .qemu/; writes .qemu/env.sh with ESPRITE_QEMU_RISCV32/XTENSA paths.
+qemu-fetch:
+	bash tools/qemu/fetch-qemu.sh
