@@ -871,7 +871,16 @@ int esprite_daemon(FILE* in, FILE* out) {
     // the fd directly, but that ignored bytes fgets() had already pulled
     // into stdio's internal buffer, deadlocking a session that pipes several
     // commands in one write() without an intervening EOF or signal.
-    while (fgets(line, sizeof(line), in)) {
+    //
+    // The explicit !sim_interrupted() check covers the other gap: a signal
+    // can just as easily land while this loop is busy processing a command
+    // (e.g. mid-boot on a qemu target, inside settle_ms's own interrupted
+    // poll) rather than while blocked in fgets(). By the time control
+    // returns here the signal has already been delivered and consumed, so
+    // no further EINTR will ever arrive to interrupt the *next* fgets() -
+    // without this check that call would block indefinitely on a
+    // still-open stdin even though g_interrupted is already set.
+    while (!sim_interrupted() && fgets(line, sizeof(line), in)) {
         // A line beyond the buffer would otherwise be parsed as two commands,
         // desyncing 1-in/1-out reply pairing. Drain it and reply with one error.
         if (!strchr(line, '\n') && !feof(in)) {
