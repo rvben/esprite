@@ -12,6 +12,11 @@ name: release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re-)publish, e.g. v0.2.0"
+        required: true
 
 permissions:
   contents: write
@@ -23,8 +28,12 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - run: make build
       - run: make test
       - run: make dist
@@ -34,6 +43,40 @@ jobs:
         run: |
           # The release is normally created first with curated notes; a bare
           # tag push still gets one (the race between matrix jobs is harmless).
-          gh release view "${{ github.ref_name }}" >/dev/null 2>&1 || \
-            gh release create "${{ github.ref_name }}" --verify-tag --generate-notes || true
-          gh release upload "${{ github.ref_name }}" dist/*.tar.gz --clobber
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --verify-tag --generate-notes || true
+          gh release upload "$TAG" dist/*.tar.gz --clobber
+
+  # Name-reservation packages on crates.io and PyPI, stamped from the tag.
+  # Idempotent: an already-published version is skipped, so a dispatch re-run
+  # (partial-publish recovery) is safe.
+  registries:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Stamp the version from the tag
+        run: |
+          VERSION="${TAG#v}"
+          sed -i "s/^version = \"0.0.0\"/version = \"$VERSION\"/" packaging/crate/Cargo.toml
+          sed -i "s/^version = \"0.0.0\"/version = \"$VERSION\"/" packaging/pypi/pyproject.toml
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          VERSION="${TAG#v}"
+          if curl -sf -A esprite-release "https://crates.io/api/v1/crates/esprite/$VERSION" >/dev/null; then
+            echo "crates.io already has $VERSION; skipping"
+          else
+            cargo publish --allow-dirty --manifest-path packaging/crate/Cargo.toml
+          fi
+      - name: Publish to PyPI
+        run: |
+          pipx run --spec build pyproject-build --outdir packaging/pypi/dist packaging/pypi
+          pipx run twine upload --skip-existing packaging/pypi/dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}

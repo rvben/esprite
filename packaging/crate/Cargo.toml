@@ -1,0 +1,14 @@
+# Name-reservation crate published by the release workflow, which stamps the
+# version from the tag. The tool itself is C++/CMake; this package points
+# users at the repo.
+[package]
+name = "esprite"
+version = "0.0.0"
+edition = "2021"
+description = "Host-native ESP32/Arduino firmware simulator with an agent-facing CLI (name reservation; the tool is C++/CMake)"
+repository = "https://github.com/rvben/esprite"
+homepage = "https://github.com/rvben/esprite"
+license = "MIT"
+keywords = ["esp32", "simulator", "firmware", "embedded", "emulator"]
+categories = ["development-tools", "emulators"]
+readme = "README.md"

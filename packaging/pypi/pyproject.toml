@@ -1,0 +1,21 @@
+# Name-reservation package published by the release workflow, which stamps the
+# version from the tag. The tool itself is C++/CMake; this package points
+# users at the repo.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "esprite"
+version = "0.0.0"
+description = "Host-native ESP32/Arduino firmware simulator with an agent-facing CLI (name reservation; the tool is C++/CMake)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+
+[project.urls]
+Homepage = "https://github.com/rvben/esprite"
+Repository = "https://github.com/rvben/esprite"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/esprite"]
