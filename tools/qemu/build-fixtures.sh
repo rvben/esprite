@@ -21,19 +21,26 @@ docker run --rm -v "$out":/out espressif/idf:release-v5.4 bash -ec '
 # which fails the QIE-bit-enable sequence on QEMU's simulated flash chip (a
 # real-hardware GD/Winbond quirk QEMU faithfully reproduces, see
 # espressif/esp-idf#1944) and then crashes with a fatal flash-init assert.
-arduino-cli core install esp32:esp32 \
+# Pinned to the version this fixture was validated against; bump deliberately
+# (the esp32 core's default board FlashMode/FlashFreq, artifact names, and
+# QEMU compatibility can all change between releases).
+arduino-cli core install esp32:esp32@3.3.10 \
   --additional-urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
 arduino-cli compile --fqbn esp32:esp32:esp32:FlashMode=dio,FlashFreq=40 \
   --export-binaries tools/qemu/arduino_tick
 b=tools/qemu/arduino_tick/build/esp32.esp32.esp32
-boot_app0=$(find "$(arduino-cli config get directories.data)/packages/esp32" \
-            -name boot_app0.bin | head -1)
+esp32_pkg="$(arduino-cli config get directories.data)/packages/esp32"
+boot_app0=$(find "$esp32_pkg" -name boot_app0.bin | head -1)
 [ -n "$boot_app0" ] || { echo "boot_app0.bin not found in esp32 core" >&2; exit 1; }
-# Prefer a standalone `esptool` on PATH: on hosts where esptool was installed
-# as a pipx/uv tool rather than into the resolved python3's site-packages,
-# `python3 -m esptool` fails with "No module named esptool".
+# Resolve esptool without assuming it's pip-installed into whatever python3
+# resolves to: prefer a standalone `esptool` on PATH, else the esptool binary
+# bundled with the esp32 core itself (installed above, so always present),
+# else fall back to `python3 -m esptool` as a last resort.
+bundled_esptool=$(find "$esp32_pkg/tools/esptool_py" -name esptool -type f | head -1)
 if command -v esptool >/dev/null 2>&1; then
   esptool_cmd=(esptool)
+elif [ -n "$bundled_esptool" ]; then
+  esptool_cmd=("$bundled_esptool")
 else
   esptool_cmd=(python3 -m esptool)
 fi
