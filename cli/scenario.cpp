@@ -129,6 +129,8 @@ int scenario_run(const std::string& path, const std::string& default_target) {
             if (ActionError e = apply_rotate(step["q"] | 0)) step_failed(e.kind, e.msg);
         } else if (!strcmp(cmd, "gpio")) {
             if (ActionError e = apply_gpio(step["pin"] | 0, step["level"] | 0)) step_failed(e.kind, e.msg);
+        } else if (!strcmp(cmd, "wifi")) {
+            if (ActionError e = apply_wifi(step["state"] | "up")) step_failed(e.kind, e.msg);
         } else if (!strcmp(cmd, "ble")) {
             const char* sub = step["sub"] | "";
             ActionError e;

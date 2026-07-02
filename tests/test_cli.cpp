@@ -1,5 +1,6 @@
 #include "cli_test_helpers.h"
 #include "Arduino.h"
+#include "WiFi.h"
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <csignal>
@@ -93,6 +94,15 @@ TEST_CASE("gpio injection is readable through the Arduino API after the command"
     CHECK(digitalRead(5) == 1);
     CHECK(run_cli({"esprite", "gpio", "5", "0", "--target", "cyd"}) == 0);
     CHECK(digitalRead(5) == 0);
+}
+
+TEST_CASE("wifi flips the simulated link and is readable through WiFi.status()") {
+    // Every boot resets the link to connected, so the default needs no command.
+    CHECK(run_cli({"esprite", "wifi", "down", "--target", "cyd"}) == 0);
+    CHECK(WiFi.status() == WL_DISCONNECTED);
+    CHECK(run_cli({"esprite", "wifi", "up", "--target", "cyd"}) == 0);
+    CHECK(WiFi.status() == WL_CONNECTED);
+    CHECK(run_cli({"esprite", "wifi", "sideways", "--target", "cyd"}) == 2);
 }
 
 TEST_CASE("ui on a non-LVGL target returns an empty bounded envelope") {

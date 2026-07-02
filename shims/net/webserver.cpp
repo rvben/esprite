@@ -21,6 +21,13 @@ MDNSResponder MDNS;
 static int g_bind_status = -1;
 int sim_http_bind_status() { return g_bind_status; }
 
+// Simulated Wi-Fi link, settable via `esprite wifi up|down`. Defaults to
+// connected, matching real hardware once provisioning succeeds.
+static bool g_wifi_connected = true;
+bool sim_wifi_connected() { return g_wifi_connected; }
+void sim_wifi_set_connected(bool connected) { g_wifi_connected = connected; }
+static void wifi_boot_reset() { g_wifi_connected = true; }
+
 // Live server instances, so every sim_boot can stop leftover listeners and
 // reset the bind status: firmware server objects are process-global statics,
 // but on a device each boot starts with no socket bound.
@@ -34,6 +41,7 @@ static void webserver_boot_reset() {
 }
 extern void sim_on_boot(void (*)());   // core/runtime
 namespace { struct BootReg { BootReg() { sim_on_boot(webserver_boot_reset); } } g_ws_boot_reg; }
+namespace { struct WifiBootReg { WifiBootReg() { sim_on_boot(wifi_boot_reset); } } g_wifi_boot_reg; }
 
 WebServer::WebServer(int port) : port_(port) {
     live_servers().push_back(this);

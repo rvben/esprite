@@ -4,6 +4,7 @@
 #include "sim_ble.h"
 #include "lvgl_snapshot.h"
 #include "Arduino.h"
+#include "WiFi.h"
 
 const BoardDesc* active_board() {
     const SimTarget* t = sim_active_target();
@@ -109,6 +110,14 @@ ActionError apply_gpio(int pin, int level) {
     if (pin < 0 || pin > 63 || (level != 0 && level != 1))
         return {"bad_args", "gpio needs a pin 0-63 and a level 0|1"};
     sim_gpio_set(pin, level);
+    sim_run_steps(5);
+    return {};
+}
+
+ActionError apply_wifi(const std::string& state) {
+    if (state != "up" && state != "down")
+        return {"bad_args", "wifi needs 'up' or 'down'"};
+    sim_wifi_set_connected(state == "up");
     sim_run_steps(5);
     return {};
 }

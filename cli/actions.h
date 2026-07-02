@@ -19,6 +19,7 @@ ActionError apply_rotate(int quadrant);
 ActionError apply_tap(int x, int y);
 ActionError apply_swipe(int x1, int y1, int x2, int y2);   // moving press -> LVGL gesture
 ActionError apply_gpio(int pin, int level);
+ActionError apply_wifi(const std::string& state);   // "up" or "down"
 
 // Assert on the LVGL UI: `text` (if non-empty) must be present, `absent` (if
 // non-empty) must not be; `exact` chooses equals vs contains. Fails 'expect_failed'.

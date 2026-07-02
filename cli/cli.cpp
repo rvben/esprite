@@ -116,6 +116,9 @@ static const std::string kSchema = std::string(R"JSON({
         { "name": "level", "description": "0 or 1.", "type": "number", "required": true }
       ],
       "example": { "args": ["9", "1", "--target", "agentgauge"], "stdin": "" } },
+    { "name": "wifi", "description": "Set the simulated Wi-Fi link up or down (read back by WiFi.status()); does not affect first-time provisioning.", "mutating": true, "stability": "stable",
+      "args": [ { "name": "state", "description": "up or down.", "type": "string", "required": true, "enum": ["up", "down"] } ],
+      "example": { "args": ["down", "--target", "agentgauge"], "stdin": "" } },
     { "name": "ble", "description": "Drive the virtual BLE link of a BLE firmware, standing in for a central/host app. One-shot `ble send` completes the round trip itself: it connects (bonded), delivers the JSON line, and returns the device's replies (add --shot to capture the resulting frame). connect/pair (passkey pairing via --passkey N), disconnect, recv, and hid hold state across commands only inside a run session or scenario. Requires a target whose firmware binds the virtual BLE link; returns bad_args otherwise.", "mutating": true, "stability": "stable",
       "args": [
         { "name": "sub", "description": "connect|pair|disconnect|send|recv|hid.", "type": "string", "required": true, "enum": ["connect", "pair", "disconnect", "send", "recv", "hid"] },
@@ -141,7 +144,7 @@ static const std::string kSchema = std::string(R"JSON({
     { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless.", "mutating": true, "stability": "stable",
       "args": [ { "name": "file", "description": "Scenario JSON path.", "type": "string", "required": true } ] },
     { "name": "serve", "description": "Boot and keep pumping so a live bridge can drive the device. HTTP: a bridge POSTs to the firmware's webserver (--port). BLE: --ble-port N exposes the virtual BLE link as newline-delimited JSON on a localhost TCP socket (connect = bonded central, lines in = host->device, device lines stream back; one client at a time). --window opens an interactive SDL window (mouse=touch, on-screen buttons + battery/USB/rotate controls). Human logs on stderr.", "mutating": true, "stability": "stable" },
-    { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), swipe (x1,y1,x2,y2), expect (text/absent/match), button, battery, rotate, gpio, ble (sub+data/passkey), snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
+    { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), swipe (x1,y1,x2,y2), expect (text/absent/match), button, battery, rotate, gpio, wifi, ble (sub+data/passkey), snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
   ],
   "errors": [
     { "kind": "no_target", "description": "No --target and more than one target registered.", "exit_code": 2 },
@@ -457,7 +460,7 @@ int esprite_main(int argc, char** argv) {
     // resolving the target, so a typo'd command is reported as bad_args rather
     // than a misleading target error.
     static const char* kBootCommands[] = {"ui", "screenshot", "snapshot", "tap", "swipe", "button",
-                                          "battery", "rotate", "gpio", "ble", "serial", "logs"};
+                                          "battery", "rotate", "gpio", "wifi", "ble", "serial", "logs"};
     bool known = false;
     for (auto* k : kBootCommands) if (cmd == k) { known = true; break; }
     if (!known)
@@ -571,6 +574,13 @@ int esprite_main(int argc, char** argv) {
         if (ActionError e = apply_gpio((int)pin, (int)lvl)) return fail(e.kind, e.msg, kind_exit(e.kind));
         emit("{\"ok\":true,\"pin\":" + std::to_string(pin) + ",\"level\":" + std::to_string(lvl ? 1 : 0) + "}",
              "gpio " + std::to_string(pin) + "=" + std::to_string(lvl ? 1 : 0));
+        return 0;
+    }
+    if (cmd == "wifi") {
+        std::string state = positional(argc, argv, 0);
+        if (ActionError e = apply_wifi(state)) return fail(e.kind, e.msg, kind_exit(e.kind));
+        maybe_shot(argc, argv);
+        emit("{\"ok\":true,\"state\":\"" + json_esc(state) + "\"}", "wifi " + state);
         return 0;
     }
     if (cmd == "ble") {
@@ -773,6 +783,9 @@ int esprite_daemon(FILE* in, FILE* out) {
             else fprintf(out, "{\"ok\":true}\n");
         } else if (cmd == "gpio") {
             if (ActionError e = apply_gpio(doc["pin"] | 0, doc["level"] | 0)) session_err(out, e.kind, e.msg);
+            else fprintf(out, "{\"ok\":true}\n");
+        } else if (cmd == "wifi") {
+            if (ActionError e = apply_wifi(doc["state"] | "up")) session_err(out, e.kind, e.msg);
             else fprintf(out, "{\"ok\":true}\n");
         } else if (cmd == "snapshot") {
             std::string body; serializeJson(doc["data"], body);
