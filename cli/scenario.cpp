@@ -116,6 +116,9 @@ int scenario_run(const std::string& path, const std::string& default_target) {
             if (ActionError e = apply_button(step["which"] | "primary")) step_failed(e.kind, e.msg);
         } else if (!strcmp(cmd, "tap")) {
             if (ActionError e = apply_tap(step["x"] | 0, step["y"] | 0)) step_failed(e.kind, e.msg);
+        } else if (!strcmp(cmd, "swipe")) {
+            if (ActionError e = apply_swipe(step["x1"] | 0, step["y1"] | 0, step["x2"] | 0, step["y2"] | 0))
+                step_failed(e.kind, e.msg);
         } else if (!strcmp(cmd, "rotate")) {
             if (ActionError e = apply_rotate(step["q"] | 0)) step_failed(e.kind, e.msg);
         } else if (!strcmp(cmd, "gpio")) {

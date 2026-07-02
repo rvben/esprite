@@ -76,6 +76,26 @@ ActionError apply_tap(int x, int y) {
     return {};
 }
 
+ActionError apply_swipe(int x1, int y1, int x2, int y2) {
+    const BoardDesc* b = active_board();
+    auto oob = [&](int x, int y) { return !b || x < 0 || y < 0 || x >= b->width || y >= b->height; };
+    if (oob(x1, y1) || oob(x2, y2))
+        return {"bad_args", "swipe needs x1 y1 x2 y2 within 0-" +
+                            std::to_string(b ? b->width - 1 : 0) + " / 0-" +
+                            std::to_string(b ? b->height - 1 : 0)};
+    // A moving press across >=8 steps/point (>33ms indev read at 5ms/step) with
+    // large per-read deltas, so LVGL registers a gesture rather than a tap.
+    sim_input().touch_pressed = true;
+    for (int i = 0; i <= 5; i++) {
+        sim_input().touch_x = x1 + (x2 - x1) * i / 5;
+        sim_input().touch_y = y1 + (y2 - y1) * i / 5;
+        sim_run_steps(8);
+    }
+    sim_input().touch_pressed = false;
+    sim_run_steps(8);
+    return {};
+}
+
 ActionError apply_gpio(int pin, int level) {
     if (pin < 0 || pin > 63 || (level != 0 && level != 1))
         return {"bad_args", "gpio needs a pin 0-63 and a level 0|1"};

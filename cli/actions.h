@@ -17,6 +17,7 @@ ActionError apply_button(const std::string& which);   // primary|secondary|pwr|p
 ActionError apply_battery(int pct, const bool* charging, const bool* vbus);
 ActionError apply_rotate(int quadrant);
 ActionError apply_tap(int x, int y);
+ActionError apply_swipe(int x1, int y1, int x2, int y2);   // moving press -> LVGL gesture
 ActionError apply_gpio(int pin, int level);
 
 // BLE link actions (the CLI stands in for the Claude desktop app). All reject

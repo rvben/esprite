@@ -93,6 +93,17 @@ static const std::string kSchema = std::string(R"JSON({
         { "name": "x", "description": "Resolved x.", "type": "number" },
         { "name": "y", "description": "Resolved y.", "type": "number" }
       ] },
+    { "name": "swipe", "description": "Inject a swipe from (x1,y1) to (x2,y2) as a moving press, so LVGL registers a gesture (e.g. page navigation).", "mutating": true, "stability": "stable",
+      "args": [
+        { "name": "x1", "description": "Start X pixel.", "type": "number", "required": true },
+        { "name": "y1", "description": "Start Y pixel.", "type": "number", "required": true },
+        { "name": "x2", "description": "End X pixel.", "type": "number", "required": true },
+        { "name": "y2", "description": "End Y pixel.", "type": "number", "required": true }
+      ],
+      "example": { "args": ["400", "240", "100", "240", "--target", "waveshare_amoled_216_c6"], "stdin": "" },
+      "output_fields": [
+        { "name": "ok", "description": "Swipe injected.", "type": "boolean" }
+      ] },
     { "name": "battery", "description": "Set battery level; --charging and --no-vbus set the flags.", "mutating": true, "stability": "stable",
       "args": [ { "name": "pct", "description": "0-100.", "type": "number", "required": true } ],
       "example": { "args": ["50", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
@@ -130,7 +141,7 @@ static const std::string kSchema = std::string(R"JSON({
     { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless.", "mutating": true, "stability": "stable",
       "args": [ { "name": "file", "description": "Scenario JSON path.", "type": "string", "required": true } ] },
     { "name": "serve", "description": "Boot and keep pumping so a live bridge can drive the device. HTTP: a bridge POSTs to the firmware's webserver (--port). BLE: --ble-port N exposes the virtual BLE link as newline-delimited JSON on a localhost TCP socket (connect = bonded central, lines in = host->device, device lines stream back; one client at a time). --window opens an interactive SDL window (mouse=touch, on-screen buttons + battery/USB/rotate controls). Human logs on stderr.", "mutating": true, "stability": "stable" },
-    { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), button, battery, rotate, gpio, ble (sub+data/passkey), snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
+    { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), swipe (x1,y1,x2,y2), button, battery, rotate, gpio, ble (sub+data/passkey), snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
   ],
   "errors": [
     { "kind": "no_target", "description": "No --target and more than one target registered.", "exit_code": 2 },
@@ -444,7 +455,7 @@ int esprite_main(int argc, char** argv) {
     // Remaining commands boot a target first. Validate the command name before
     // resolving the target, so a typo'd command is reported as bad_args rather
     // than a misleading target error.
-    static const char* kBootCommands[] = {"ui", "screenshot", "snapshot", "tap", "button",
+    static const char* kBootCommands[] = {"ui", "screenshot", "snapshot", "tap", "swipe", "button",
                                           "battery", "rotate", "gpio", "ble", "serial", "logs"};
     bool known = false;
     for (auto* k : kBootCommands) if (cmd == k) { known = true; break; }
@@ -506,6 +517,17 @@ int esprite_main(int argc, char** argv) {
         maybe_shot(argc, argv);
         emit("{\"ok\":true" + extra + ",\"x\":" + std::to_string(x) + ",\"y\":" + std::to_string(y) + "}",
              "tapped " + std::to_string(x) + "," + std::to_string(y));
+        return 0;
+    }
+    if (cmd == "swipe") {
+        long v[4];
+        for (int i = 0; i < 4; i++)
+            if (!to_long(positional(argc, argv, i), 0, 100000, &v[i]))
+                return fail("bad_args", "swipe needs integer x1 y1 x2 y2", 2);
+        if (ActionError e = apply_swipe((int)v[0], (int)v[1], (int)v[2], (int)v[3]))
+            return fail(e.kind, e.msg, kind_exit(e.kind));
+        maybe_shot(argc, argv);
+        emit("{\"ok\":true}", "swiped");
         return 0;
     }
     if (cmd == "button") {
@@ -724,6 +746,10 @@ int esprite_daemon(FILE* in, FILE* out) {
             } else { x = doc["x"] | 0; y = doc["y"] | 0; }
             if (ActionError e = apply_tap(x, y)) session_err(out, e.kind, e.msg);
             else fprintf(out, "{\"ok\":true,\"x\":%d,\"y\":%d}\n", x, y);
+        } else if (cmd == "swipe") {
+            if (ActionError e = apply_swipe(doc["x1"] | 0, doc["y1"] | 0, doc["x2"] | 0, doc["y2"] | 0))
+                session_err(out, e.kind, e.msg);
+            else fprintf(out, "{\"ok\":true}\n");
         } else if (cmd == "button") {
             if (ActionError e = apply_button(doc["which"] | "primary")) session_err(out, e.kind, e.msg);
             else fprintf(out, "{\"ok\":true}\n");
