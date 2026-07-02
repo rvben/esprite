@@ -78,6 +78,12 @@ QemuProcess::~QemuProcess() { stop(); }
 bool QemuProcess::spawn_only(const std::vector<std::string>& argv, std::string* err) {
     if (argv.empty()) { set_err(err, "empty argv"); return false; }
 
+    // A serial_write() after the child has exited (or closed its stdin) hits
+    // a broken pipe; default SIGPIPE disposition would kill the whole
+    // simulator instead of letting write() fail with EPIPE (same fix as
+    // WebServer::begin() applies to its client sockets).
+    signal(SIGPIPE, SIG_IGN);
+
     int in_pipe[2];   // parent writes in_pipe[1] -> child reads in_pipe[0] as stdin
     int out_pipe[2];  // child writes out_pipe[1] (stdout+stderr) -> parent reads out_pipe[0]
     if (pipe(in_pipe) != 0) { set_errno_err(err, "pipe(stdin)"); return false; }
@@ -160,13 +166,17 @@ bool QemuProcess::start(const QemuSpec& spec, std::string* err) {
 
 bool QemuProcess::running() {
     if (pid < 0) return false;
-    int status;
-    pid_t r = waitpid(pid, &status, WNOHANG);
-    if (r == 0) return true;   // still running
-    // r == pid: reaped, exited or signaled. r < 0 (e.g. ECHILD): already
-    // reaped elsewhere. Either way there is nothing left to wait for.
-    pid = -1;
-    return false;
+    for (;;) {
+        int status;
+        pid_t r = waitpid(pid, &status, WNOHANG);
+        if (r == 0) return true;                      // still running
+        if (r < 0 && errno == EINTR) continue;         // interrupted by a handled signal; retry
+        // r == pid: reaped, exited or signaled. r < 0 otherwise (e.g.
+        // ECHILD): already reaped elsewhere. Either way nothing left to
+        // wait for.
+        pid = -1;
+        return false;
+    }
 }
 
 void QemuProcess::pump() {
