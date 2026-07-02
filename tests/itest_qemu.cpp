@@ -94,8 +94,12 @@ TEST_CASE("C3 hello_world: two icount runs produce identical serial") {
         // printing "Hello world!" but before completing the countdown)
         // would still pass, since pump_until returns the partial output on
         // a timeout rather than failing outright.
+        // Comma-separated arguments (not a `+`-concatenated string): doctest's
+        // MESSAGE/INFO macros chain arguments via operator*/operator,, which
+        // bind tighter than `+`, so "text" + out would parse as
+        // (mb * "text") + out and fail to compile.
         REQUIRE_MESSAGE(out.find("Restarting now.") != std::string::npos,
-                         "never reached the restart marker within 30s; captured: " + out);
+                         "never reached the restart marker within 30s; captured: ", out);
         REQUIRE(out.find("Hello world!") != std::string::npos);
         return out.substr(0, out.find("Restarting now."));
     };
@@ -130,6 +134,6 @@ TEST_CASE("ESP32 arduino image boots and ticks") {
     // "arduino_tick boot" would let a hang between boot and the second tick
     // pass silently.
     REQUIRE_MESSAGE(out.find("tick 2") != std::string::npos,
-                     "never reached 'tick 2' within 30s; captured: " + out);
+                     "never reached 'tick 2' within 30s; captured: ", out);
     CHECK(out.find("arduino_tick boot") != std::string::npos);
 }
