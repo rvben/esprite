@@ -20,7 +20,11 @@ esac
 assets=$(curl -fsSL "https://api.github.com/repos/espressif/qemu/releases/tags/$TAG" \
          | python3 -c 'import json,sys; [print(a["browser_download_url"]) for a in json.load(sys.stdin)["assets"]]')
 for arch in xtensa riscv32; do
-  url=$(printf '%s\n' "$assets" | grep "$arch" | grep "$pat" | head -1)
+  # `|| true` keeps a no-match pipeline from tripping `set -e` here: under
+  # pipefail a failed grep still fails the whole pipeline even though head
+  # exits 0, which would otherwise kill the script before the explicit
+  # "no asset matching" diagnostic below ever runs.
+  url=$(printf '%s\n' "$assets" | grep "$arch" | grep "$pat" | head -1 || true)
   [ -n "$url" ] || { echo "no $arch asset matching $pat in $TAG" >&2; exit 1; }
   curl -fsSL "$url" -o "$arch.tar.xz"
   mkdir -p "$arch" && tar -xf "$arch.tar.xz" -C "$arch" --strip-components=1
