@@ -1,6 +1,7 @@
 #include "doctest.h"
 #include "qemu_process.h"
 #include <unistd.h>
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -61,4 +62,41 @@ TEST_CASE("spawn_only reports an error for a nonexistent binary") {
     CHECK(!p.spawn_only({"/nonexistent/binary-does-not-exist"}, &err));
     CHECK(!err.empty());
     CHECK(!p.running());
+}
+
+TEST_CASE("serial_write returns false within the deadline against a child that never reads") {
+    // /bin/sleep never touches its stdin, so the pipe fills (default macOS/
+    // Linux pipe capacity is 64KB) and a naive blocking write() would wedge
+    // forever once the buffer is full. A 128KB payload guarantees it fills:
+    // the write loop must give up at kSerialWriteDeadlineMs (2000ms) rather
+    // than hang, which is the actual regression this guards against.
+    QemuProcess p;
+    std::string err;
+    REQUIRE(p.spawn_only({"/bin/sleep", "5"}, &err));
+    std::string payload(128 * 1024, 'x');
+    auto start = std::chrono::steady_clock::now();
+    bool ok = p.serial_write(payload);
+    auto elapsed = std::chrono::steady_clock::now() - start;
+    CHECK(!ok);
+    // Generous upper bound (well above the 2000ms deadline) so this stays
+    // robust under slow/loaded CI without weakening what it actually checks:
+    // that serial_write returns at all instead of hanging for the full 5s
+    // the child stays alive.
+    CHECK(elapsed < std::chrono::milliseconds(4000));
+    p.stop();
+    CHECK(!p.running());
+}
+
+TEST_CASE("qemu_needs_fd_normalize flags only 0/1/2") {
+    // spawn_only() must move a pipe fd that lands on 0/1/2 (possible when the
+    // parent starts with a stdio fd already closed, e.g. under a
+    // daemon/supervisor) before referencing it by number in a
+    // posix_spawn_file_actions_t; this is the pure decision that gates it.
+    CHECK(qemu_needs_fd_normalize(0));
+    CHECK(qemu_needs_fd_normalize(1));
+    CHECK(qemu_needs_fd_normalize(2));
+    CHECK(!qemu_needs_fd_normalize(3));
+    CHECK(!qemu_needs_fd_normalize(4));
+    CHECK(!qemu_needs_fd_normalize(1024));
+    CHECK(!qemu_needs_fd_normalize(-1));
 }

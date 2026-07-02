@@ -3,6 +3,7 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <unistd.h>
 #include <cerrno>
 #include <cstring>
@@ -28,6 +29,35 @@ void set_errno_err(std::string* err, const char* what) {
 void close_if_open(int& fd) {
     if (fd >= 0) { ::close(fd); fd = -1; }
 }
+
+// Moves fd to a number above STDERR_FILENO via F_DUPFD, closing the original;
+// a no-op that returns fd unchanged when it's already safe. See
+// qemu_needs_fd_normalize's comment in qemu_process.h for why this has to
+// run before spawn_only() builds its file actions.
+int normalize_fd(int fd, std::string* err) {
+    if (!qemu_needs_fd_normalize(fd)) return fd;
+    int moved = fcntl(fd, F_DUPFD, STDERR_FILENO + 1);
+    if (moved < 0) { set_errno_err(err, "fcntl(F_DUPFD)"); return -1; }
+    ::close(fd);
+    return moved;
+}
+
+bool set_nonblocking(int fd, std::string* err) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0) { set_errno_err(err, "fcntl(F_GETFL)"); return false; }
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        set_errno_err(err, "fcntl(F_SETFL, O_NONBLOCK)");
+        return false;
+    }
+    return true;
+}
+
+// Bound on how long serial_write() will block waiting for the child to drain
+// its stdin. A guest that stops reading (hung firmware, crashed before UART
+// init) must not wedge the CLI's `serial send` forever; 2s is generous for a
+// live QEMU child under normal load while still being a bounded contract a
+// caller can rely on.
+constexpr int kSerialWriteDeadlineMs = 2000;
 
 // Retry window for the QMP connect inside start(): QEMU only creates the QMP
 // unix socket partway through boot, and boot itself can take seconds under
@@ -73,6 +103,10 @@ std::vector<std::string> qemu_build_argv(const QemuSpec& spec) {
     return argv;
 }
 
+bool qemu_needs_fd_normalize(int fd) {
+    return fd >= 0 && fd <= STDERR_FILENO;
+}
+
 QemuProcess::~QemuProcess() { stop(); }
 
 bool QemuProcess::spawn_only(const std::vector<std::string>& argv, std::string* err) {
@@ -94,20 +128,52 @@ bool QemuProcess::spawn_only(const std::vector<std::string>& argv, std::string* 
         return false;
     }
 
+    // Move any pipe fd that landed on 0/1/2 out of the way before the file
+    // actions below reference them by number (qemu_needs_fd_normalize's
+    // header comment has the failure mode this avoids).
+    int* pipe_fds[] = {&in_pipe[0], &in_pipe[1], &out_pipe[0], &out_pipe[1]};
+    for (int* fd : pipe_fds) {
+        int moved = normalize_fd(*fd, err);
+        if (moved < 0) {
+            close_if_open(in_pipe[0]);
+            close_if_open(in_pipe[1]);
+            close_if_open(out_pipe[0]);
+            close_if_open(out_pipe[1]);
+            return false;
+        }
+        *fd = moved;
+    }
+
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
-    posix_spawn_file_actions_adddup2(&actions, in_pipe[0], STDIN_FILENO);
-    posix_spawn_file_actions_adddup2(&actions, out_pipe[1], STDOUT_FILENO);
-    posix_spawn_file_actions_adddup2(&actions, out_pipe[1], STDERR_FILENO);
+    // Each posix_spawn_file_actions_* call below can itself fail (e.g. ENOMEM
+    // recording the action); rc/which track the first failure so it is
+    // reported precisely instead of silently building a partial action list
+    // that posix_spawn would then apply incompletely.
+    int rc = 0;
+    const char* which = nullptr;
+    auto add = [&](int r, const char* what) { if (rc == 0 && r != 0) { rc = r; which = what; } };
+    add(posix_spawn_file_actions_adddup2(&actions, in_pipe[0], STDIN_FILENO), "adddup2(stdin)");
+    add(posix_spawn_file_actions_adddup2(&actions, out_pipe[1], STDOUT_FILENO), "adddup2(stdout)");
+    add(posix_spawn_file_actions_adddup2(&actions, out_pipe[1], STDERR_FILENO), "adddup2(stderr)");
     // adddup2 leaves the original fd numbers open alongside the 0/1/2 dups;
     // close them explicitly so the child doesn't inherit spare pipe ends
     // (an extra open write end on out_pipe would keep the parent's read end
     // from ever seeing EOF, since the kernel only signals EOF once every
     // writer has closed).
-    posix_spawn_file_actions_addclose(&actions, in_pipe[0]);
-    posix_spawn_file_actions_addclose(&actions, in_pipe[1]);
-    posix_spawn_file_actions_addclose(&actions, out_pipe[0]);
-    posix_spawn_file_actions_addclose(&actions, out_pipe[1]);
+    add(posix_spawn_file_actions_addclose(&actions, in_pipe[0]), "addclose(in_pipe[0])");
+    add(posix_spawn_file_actions_addclose(&actions, in_pipe[1]), "addclose(in_pipe[1])");
+    add(posix_spawn_file_actions_addclose(&actions, out_pipe[0]), "addclose(out_pipe[0])");
+    add(posix_spawn_file_actions_addclose(&actions, out_pipe[1]), "addclose(out_pipe[1])");
+    if (rc != 0) {
+        set_err(err, std::string("posix_spawn_file_actions_") + which + ": " + strerror(rc));
+        posix_spawn_file_actions_destroy(&actions);
+        close_if_open(in_pipe[0]);
+        close_if_open(in_pipe[1]);
+        close_if_open(out_pipe[0]);
+        close_if_open(out_pipe[1]);
+        return false;
+    }
 
     std::vector<char*> cargv;
     cargv.reserve(argv.size() + 1);
@@ -115,11 +181,11 @@ bool QemuProcess::spawn_only(const std::vector<std::string>& argv, std::string* 
     cargv.push_back(nullptr);
 
     pid_t child = -1;
-    int rc = posix_spawn(&child, argv[0].c_str(), &actions, nullptr, cargv.data(), environ);
+    int spawn_rc = posix_spawn(&child, argv[0].c_str(), &actions, nullptr, cargv.data(), environ);
     posix_spawn_file_actions_destroy(&actions);
 
-    if (rc != 0) {
-        set_err(err, std::string("posix_spawn: ") + strerror(rc));
+    if (spawn_rc != 0) {
+        set_err(err, std::string("posix_spawn: ") + strerror(spawn_rc));
         close_if_open(in_pipe[0]);
         close_if_open(in_pipe[1]);
         close_if_open(out_pipe[0]);
@@ -132,27 +198,22 @@ bool QemuProcess::spawn_only(const std::vector<std::string>& argv, std::string* 
     close_if_open(in_pipe[0]);
     close_if_open(out_pipe[1]);
 
-    // in_fd stays blocking: serial_write() is best-effort per its documented
-    // contract (a short synchronous write to the child's stdin), unlike
-    // out_fd's non-blocking drain in pump().
+    // Both ends are non-blocking: out_fd for pump()'s non-blocking drain,
+    // in_fd so serial_write() can poll(POLLOUT)-bound its writes instead of
+    // wedging forever against a guest that stops reading its stdin.
     in_fd = in_pipe[1];
     out_fd = out_pipe[0];
     pid = child;
     captured.clear();
 
-    int flags = fcntl(out_fd, F_GETFL, 0);
-    if (flags < 0) { set_errno_err(err, "fcntl(F_GETFL)"); stop(); return false; }
-    if (fcntl(out_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
-        set_errno_err(err, "fcntl(F_SETFL, O_NONBLOCK)");
-        stop();
-        return false;
-    }
+    if (!set_nonblocking(out_fd, err) || !set_nonblocking(in_fd, err)) { stop(); return false; }
     return true;
 }
 
 bool QemuProcess::start(const QemuSpec& spec, std::string* err) {
     auto argv = qemu_build_argv(spec);
     if (!spawn_only(argv, err)) return false;
+    interrupted = spec.interrupted;   // serial_write's deadline loop bails early on this too
 
     auto deadline = Clock::now() + std::chrono::milliseconds(kQmpConnectWindowMs);
     std::string connect_err;
@@ -209,12 +270,27 @@ void QemuProcess::pump() {
 
 bool QemuProcess::serial_write(const std::string& data) {
     if (in_fd < 0) return false;
+    auto deadline = Clock::now() + std::chrono::milliseconds(kSerialWriteDeadlineMs);
     size_t off = 0;
     while (off < data.size()) {
+        if (interrupted && interrupted()) return false;
+        auto remaining = deadline - Clock::now();
+        if (remaining <= std::chrono::milliseconds(0)) return false;   // deadline exceeded
+
+        struct pollfd pfd { in_fd, POLLOUT, 0 };
+        int pr = ::poll(&pfd, 1, (int)std::chrono::duration_cast<std::chrono::milliseconds>(remaining).count());
+        if (pr < 0) {
+            if (errno == EINTR) continue;
+            return false;
+        }
+        if (pr == 0) return false;   // timed out waiting for the pipe to become writable
+        if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) return false;   // child closed/gone
+
         ssize_t n = ::write(in_fd, data.data() + off, data.size() - off);
         if (n > 0) { off += (size_t)n; continue; }
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) continue;   // poll's readiness was stale; retry
         if (n < 0 && errno == EINTR) continue;
-        return false;
+        return false;   // genuine write error, e.g. EPIPE from a dead child
     }
     return true;
 }

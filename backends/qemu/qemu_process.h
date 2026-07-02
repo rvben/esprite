@@ -28,6 +28,16 @@ struct QemuSpec {
 // tests/test_qemu_process.cpp for the flags this must always/never emit.
 std::vector<std::string> qemu_build_argv(const QemuSpec& spec);
 
+// True when fd lands on a standard stream (0/1/2) and must be moved before
+// spawn_only() builds its posix_spawn_file_actions_t: a parent that starts
+// with any of its own stdio fds already closed (a daemon/supervisor launcher
+// habit) leaves pipe() free to hand back 0/1/2, and dup2(fd, fd) for a fd
+// already at its target is a same-fd no-op that only clears CLOEXEC - the
+// addclose(fd) queued right after it would then close the fd the child was
+// supposed to inherit. Pure decision, no syscalls, so this fd-collision case
+// is unit-testable without needing to fake actual fd exhaustion.
+bool qemu_needs_fd_normalize(int fd);
+
 // Owns one QEMU child process end to end: spawn, QMP handshake, non-blocking
 // stdio serial capture, and an escalating stop(). Not copyable: pid, the two
 // pipe fds, and the QmpClient member are all single-owner resources that
@@ -72,10 +82,22 @@ struct QemuProcess {
 
     std::string serial_output() const { return captured; }
 
-    // Writes to the child's stdin (its UART0 under -nographic). Best-effort:
-    // returns false on a write error, e.g. the child has already exited.
+    // Writes to the child's stdin (its UART0 under -nographic), bounded by
+    // kSerialWriteDeadlineMs total (a guest that stops draining stdin must
+    // not hang the caller forever). Polls POLLOUT rather than blocking in
+    // write(), and bails early - returning false - the moment `interrupted`
+    // (set from QemuSpec::interrupted by start(); left null when spawn_only()
+    // is used directly, e.g. in tests) reports a pending signal. Returns
+    // false on a write error too (e.g. the child has already exited) or on
+    // hitting the deadline; a partial write is not undone; only bytes never
+    // attempted are the reported failure.
     bool serial_write(const std::string& data);
 
     QmpClient qmp;
     pid_t pid = -1; int out_fd = -1; int in_fd = -1; std::string captured;
+    // Same interrupt accessor as QemuSpec::interrupted (see its comment):
+    // start() copies it here so serial_write(), called long after start()
+    // returns, can still bail out on a pending signal without needing a
+    // QemuSpec passed back in.
+    bool (*interrupted)() = nullptr;
 };
