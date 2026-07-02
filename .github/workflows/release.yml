@@ -1,0 +1,33 @@
+# On a version tag: run the suite, build optimized binaries for macOS (arm64)
+# and Linux (x86_64), and attach the tarballs to the GitHub release for that
+# tag. Every build step is a make target, runnable locally as-is.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: make build
+      - run: make test
+      - run: make dist
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The release is normally created first with curated notes; a bare
+          # tag push still gets one (the race between matrix jobs is harmless).
+          gh release view "${{ github.ref_name }}" >/dev/null 2>&1 || \
+            gh release create "${{ github.ref_name }}" --verify-tag --generate-notes || true
+          gh release upload "${{ github.ref_name }}" dist/*.tar.gz --clobber

@@ -1,5 +1,6 @@
 build/
 build-release/
+dist/
 *.png
 !docs/**/*.png
 .DS_Store

@@ -10,7 +10,7 @@ ifdef CLAWDMETER_SRC
 CMAKE_ARGS += -DCLAWDMETER_SRC=$(CLAWDMETER_SRC)
 endif
 
-.PHONY: configure build test screenshot scenario goldens release install clean
+.PHONY: configure build test screenshot scenario goldens release install dist clean
 
 configure:
 	cmake -S . -B $(BUILD) $(CMAKE_ARGS)
@@ -26,6 +26,19 @@ release:
 # Install the release binary to $(PREFIX)/bin (override PREFIX=~/.local).
 install: release
 	cmake --install $(RELEASE) --prefix $(PREFIX)
+
+# Distributable tarball in dist/: esprite-<version>-<os>-<arch>.tar.gz with the
+# optimized binary, LICENSE, and README. Version comes from the binary itself.
+dist: release
+	@set -e; \
+	VERSION=$$($(RELEASE)/esprite --version | sed 's/.*"version":"\([^"]*\)".*/\1/'); \
+	OS=$$(uname -s | tr '[:upper:]' '[:lower:]'); ARCH=$$(uname -m); \
+	NAME=esprite-$$VERSION-$$OS-$$ARCH; \
+	rm -rf dist/$$NAME; mkdir -p dist/$$NAME; \
+	cp $(RELEASE)/esprite LICENSE README.md dist/$$NAME/; \
+	tar -czf dist/$$NAME.tar.gz -C dist $$NAME; \
+	rm -rf dist/$$NAME; \
+	echo "dist/$$NAME.tar.gz"
 
 # Unit tests (sim_tests) and target integration tests (sim_itests).
 test: build
