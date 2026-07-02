@@ -65,6 +65,23 @@ TEST_CASE("run session: a second boot is rejected, not silently corrupting") {
     CHECK(out.find("\"kind\":\"already_booted\"") != std::string::npos);
 }
 
+TEST_CASE("run session: booting a qemu target installs the qemu backend even when esprite_main never ran") {
+    // Regression: esprite_daemon() is a public entry point this test (and
+    // others) call directly, bypassing esprite_main's qemu_backend_install()
+    // call. Without esprite_daemon also installing it, BACKEND_QEMU is
+    // unregistered and sim_backend_select falls back to native
+    // (core/backend.cpp), which trivially "succeeds" for qemu_esp32c3 (its
+    // setup() is null, so native's sim_boot() does nothing and still returns
+    // true) even though no qemu binary or image is configured.
+    unsetenv("ESPRITE_QEMU_BIN");
+    unsetenv("ESPRITE_QEMU_RISCV32");
+    unsetenv("ESPRITE_QEMU_XTENSA");
+    unsetenv("ESPRITE_QEMU_IMAGE");
+    std::string out = run_daemon("{\"cmd\":\"boot\",\"target\":\"qemu_esp32c3\"}\n");
+    CHECK(out.find("\"kind\":\"backend_unavailable\"") != std::string::npos);
+    CHECK(out.find("\"ok\":true") == std::string::npos);
+}
+
 TEST_CASE("run session: an invalid serial-expect regex is an error reply, not a crash") {
     // Regression: a malformed pattern threw std::regex_error out of the session
     // loop, killing the whole persistent session (and process).

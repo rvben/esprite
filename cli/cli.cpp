@@ -35,6 +35,29 @@
 // both are "give the firmware a beat to produce output" pumps, not boots.
 static const int SERIAL_SETTLE_STEPS = 60;
 
+// Wall-clock equivalent for a qemu target: sim_run_steps() only advances a
+// target's loop(), which a qemu target never has (it boots a child process
+// instead of calling Arduino code in this one), so it is a silent no-op
+// there. Route the same "give the firmware a beat" wait through the active
+// backend's settle_ms() instead, which for qemu actually pumps the child's
+// I/O for real wall-clock time.
+static const unsigned SERIAL_SETTLE_QEMU_MS = 500;
+
+// Gives the active target time to react to a serial send/before a serial
+// expect. Native targets step their in-process loop(); a qemu target has no
+// loop() to step, so it settles through the backend's own wall-clock pump
+// instead (see SERIAL_SETTLE_QEMU_MS). Checked via sim_backend().name(), not
+// sim_active_target(): a qemu boot never calls core's sim_boot() (it manages
+// its own child process instead), so core's notion of the active target
+// stays stale/null for a qemu-only process - the backend seam is the only
+// reliable source for "which implementation is actually running".
+static void serial_settle(int native_steps) {
+    if (std::string(sim_backend().name()) == "qemu")
+        sim_backend().settle_ms(SERIAL_SETTLE_QEMU_MS);
+    else
+        sim_run_steps(native_steps);
+}
+
 // Ensures the active backend's child process (if any) never outlives one CLI
 // invocation or run session: destroyed on every exit path - success, an
 // error envelope's early return, daemon EOF/quit, and the serve
@@ -743,14 +766,14 @@ int esprite_main(int argc, char** argv) {
     if (cmd == "serial") {
         std::string sub = positional(argc, argv, 0), arg = positional(argc, argv, 1);
         if (sub == "send") {
-            sim_backend().serial_inject(arg + "\n"); sim_run_steps(5);
+            sim_backend().serial_inject(arg + "\n"); serial_settle(5);
             emit("{\"ok\":true}", "sent");
             return 0;
         }
         if (sub == "expect") {
             if (!sim_serial_regex_valid(arg))
                 return fail("bad_args", "invalid regex '" + arg + "'", 2);
-            sim_run_steps(SERIAL_SETTLE_STEPS);
+            serial_settle(SERIAL_SETTLE_STEPS);
             bool matched = sim_serial_regex_search(sim_backend().serial_output(), arg);
             emit("{\"matched\":" + std::string(jbool(matched)) + "}", matched ? "matched" : "no match");
             return matched ? 0 : 1;
@@ -777,6 +800,13 @@ static void session_err(FILE* out, const char* kind, const std::string& msg) {
 // for {"cmd":"tap","ref":...} within the session (the snapshot-ref model).
 // Streams are injected so tests can drive a full session in-process.
 int esprite_daemon(FILE* in, FILE* out) {
+    // esprite_main also does this, but esprite_daemon is a public entry point
+    // tests (and future callers) invoke directly - without this, a qemu boot
+    // in such a process would find BACKEND_QEMU unregistered and silently
+    // fall back to native (core/backend.cpp's sim_backend_select), which
+    // trivially "succeeds" instead of surfacing backend_unavailable.
+    // Idempotent: safe alongside esprite_main's own call in the same process.
+    qemu_backend_install();
     BackendShutdownGuard backend_guard;   // tests call esprite_daemon directly, bypassing esprite_main
     char line[16384];
     bool booted = false;
@@ -931,13 +961,13 @@ int esprite_daemon(FILE* in, FILE* out) {
             std::string sub = doc["sub"] | "";
             if (sub == "send") {
                 std::string text = doc["text"] | "";
-                sim_backend().serial_inject(text + "\n"); sim_run_steps(5); fprintf(out, "{\"ok\":true}\n");
+                sim_backend().serial_inject(text + "\n"); serial_settle(5); fprintf(out, "{\"ok\":true}\n");
             } else if (sub == "expect") {
                 std::string rx = doc["regex"] | "";
                 if (!sim_serial_regex_valid(rx)) {
                     session_err(out, "bad_args", "invalid regex '" + rx + "'");
                 } else {
-                    sim_run_steps(SERIAL_SETTLE_STEPS);
+                    serial_settle(SERIAL_SETTLE_STEPS);
                     fprintf(out, "{\"matched\":%s}\n", jbool(sim_serial_regex_search(sim_backend().serial_output(), rx)));
                 }
             } else session_err(out, "bad_args", "serial takes sub send|expect");
