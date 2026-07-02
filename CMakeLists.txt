@@ -190,7 +190,7 @@ endforeach()
 
 # QEMU backend: a minimal blocking QMP client over a unix socket (Task 5 adds
 # the process manager on top of it; Task 6 wires it in as a SimBackend).
-add_library(qemu_backend STATIC backends/qemu/qmp.cpp)
+add_library(qemu_backend STATIC backends/qemu/qmp.cpp backends/qemu/qemu_process.cpp)
 target_include_directories(qemu_backend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/backends/qemu)
 # ArduinoJson's optional Arduino String integration (ARDUINOJSON_ENABLE_ARDUINO_STRING,
 # set globally on the ArduinoJson target) pulls in Arduino.h even though qmp.cpp
@@ -236,6 +236,7 @@ add_executable(sim_tests
     tests/test_daemon.cpp
     tests/test_backend.cpp
     tests/test_qmp.cpp
+    tests/test_qemu_process.cpp
 )
 target_link_libraries(sim_tests PRIVATE cli_lib)
 link_sim_targets(sim_tests)

@@ -1,0 +1,75 @@
+#pragma once
+#include "qmp.h"
+#include <string>
+#include <vector>
+#include <sys/types.h>
+
+// QEMU boot spec: pins the child binary, target machine, flash image, and
+// QMP control socket path (caller chooses the directory, typically a
+// mkdtemp'd scratch dir alongside the flash image). icount pins deterministic
+// virtual-time execution (used by later gated tests); off by default so the
+// child just runs at wall-clock speed.
+struct QemuSpec {
+    std::string qemu_bin;      // qemu-system-riscv32 / -xtensa
+    std::string machine;       // "esp32c3" | "esp32" | "esp32s3"
+    std::string flash_image;   // merged flash image (raw, mtd)
+    bool        icount = false;        // -icount shift=3,align=off,sleep=off
+    std::string qmp_socket;            // unix socket path (caller-chosen dir)
+};
+
+// Pure and unit-testable: builds the exact child argv from spec. No side
+// effects (no spawn, no filesystem access) - see the argv contract in
+// tests/test_qemu_process.cpp for the flags this must always/never emit.
+std::vector<std::string> qemu_build_argv(const QemuSpec& spec);
+
+// Owns one QEMU child process end to end: spawn, QMP handshake, non-blocking
+// stdio serial capture, and an escalating stop(). Not copyable: pid, the two
+// pipe fds, and the QmpClient member are all single-owner resources that
+// stop() (called from the destructor) assumes exactly one QemuProcess
+// instance is responsible for - same rationale as QmpClient's own deleted
+// copy ops. Move is implicitly absent for the same reason (a user-declared
+// destructor plus deleted copy ops suppresses the implicit move members).
+struct QemuProcess {
+    QemuProcess() = default;
+    ~QemuProcess();
+    QemuProcess(const QemuProcess&) = delete;
+    QemuProcess& operator=(const QemuProcess&) = delete;
+
+    // Builds argv from spec, spawns the child, then connects QMP with
+    // retries spanning a generous window (the QMP unix socket is only
+    // created partway through QEMU's boot, and boot itself can take seconds
+    // under host load - see kQmpConnectWindowMs in qemu_process.cpp). On
+    // failure the child is stopped before returning.
+    bool start(const QemuSpec& spec, std::string* err);
+
+    // Spawns argv directly with no QMP step: the process plumbing start()
+    // composes on top of. Exposed (not just an implementation detail) so
+    // lifecycle - spawn, capture, stop - is testable against a stand-in
+    // child like /bin/cat instead of a real QEMU binary.
+    bool spawn_only(const std::vector<std::string>& argv, std::string* err);
+
+    // Escalating, idempotent shutdown: QMP "quit" if connected, then SIGTERM
+    // (~2s wait), then SIGKILL (~1s wait), always finishing with a waitpid
+    // reap and fd close. Safe to call when nothing was ever spawned, and
+    // safe to call more than once.
+    void stop();
+
+    // True if the child is still alive. Reaps a just-exited child as a side
+    // effect (non-blocking waitpid), so stop() can rely on it to tell
+    // whether escalation is still needed.
+    bool running();
+
+    // Non-blocking: drains whatever the child has written to its merged
+    // stdout+stderr pipe since the last pump() into captured. Never blocks,
+    // even when the child has written nothing.
+    void pump();
+
+    std::string serial_output() const { return captured; }
+
+    // Writes to the child's stdin (its UART0 under -nographic). Best-effort:
+    // returns false on a write error, e.g. the child has already exited.
+    bool serial_write(const std::string& data);
+
+    QmpClient qmp;
+    pid_t pid = -1; int out_fd = -1; int in_fd = -1; std::string captured;
+};
