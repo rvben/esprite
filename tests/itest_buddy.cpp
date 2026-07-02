@@ -4,6 +4,7 @@
 #include "runtime.h"
 #include "sim_input.h"
 #include "sim_ble.h"
+#include "lvgl_snapshot.h"
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -91,4 +92,53 @@ TEST_CASE("the hold-to-pair gesture clears bonds and re-advertises") {
     CHECK(sim_serial_contains("Pair: armed"));
     CHECK(sim_serial_contains("clearing bonds"));
     CHECK(sim_ble_link_state() == SIM_BLE_ADVERTISING);
+}
+
+TEST_CASE("time sync turns the title into a live wall clock") {
+    // Reconnect (the pair gesture dropped the link) and send the one-shot
+    // {"time":[epoch, tz]} the desktop sends on connect. Epoch 45240 is
+    // 12:34 wall clock; the firmware replaces the "Usage" title with it.
+    sim_ble_host_connect(0);
+    sim_settle_ms();
+    sim_ble_host_send("{\"time\":[45240,0]}");
+    // The clock reaches the UI with the next heartbeat (ui_update runs when a
+    // snapshot applies), exactly the desktop's connect sequence.
+    sim_ble_host_send("{\"total\":1,\"running\":0}");
+    sim_settle_ms(500, 200);
+    CHECK(lvgl_snapshot_json().find("12:34") != std::string::npos);
+}
+
+// Real firmware state, linked straight from idle.cpp.
+extern bool idle_is_asleep(void);
+
+TEST_CASE("the device sleeps after the idle timeout and swallows the wake press") {
+    // Arm a pending prompt first (its arrival counts as activity), then let 30
+    // virtual minutes pass on battery power (sleep is disabled on USB).
+    sim_ble_host_send(
+        "{\"prompt\":{\"id\":\"p2\",\"tool\":\"Edit\",\"hint\":\"write file\"}}");
+    sim_settle_ms();
+    (void)sim_ble_host_drain();   // discard anything sent so far
+    CHECK_FALSE(idle_is_asleep());
+
+    sim_input().vbus = false;                 // unplug: sleep becomes possible
+    sim_settle_ms(31 * 60 * 1000, 800000);    // 31 virtual minutes
+    CHECK(idle_is_asleep());
+
+    // First PRIMARY press only wakes: no permission decision goes out.
+    sim_input().button[0] = true;  sim_run_steps(5);
+    sim_input().button[0] = false; sim_run_steps(5);
+    sim_settle_ms(500, 200);                  // wake fade-in
+    CHECK_FALSE(idle_is_asleep());
+    for (const std::string& l : sim_ble_host_drain())
+        CHECK(l.find("permission") == std::string::npos);
+
+    // The second press acts: the pending prompt is approved.
+    sim_input().button[0] = true;  sim_run_steps(5);
+    sim_input().button[0] = false; sim_run_steps(5);
+    bool sent = false;
+    for (const std::string& l : sim_ble_host_drain())
+        if (l.find("\"cmd\":\"permission\",\"id\":\"p2\",\"decision\":\"once\"") != std::string::npos)
+            sent = true;
+    CHECK(sent);
+    sim_input().vbus = true;   // restore the bus default for any later cases
 }
