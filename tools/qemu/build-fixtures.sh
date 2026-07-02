@@ -30,13 +30,17 @@ arduino-cli compile --fqbn esp32:esp32:esp32:FlashMode=dio,FlashFreq=40 \
   --export-binaries tools/qemu/arduino_tick
 b=tools/qemu/arduino_tick/build/esp32.esp32.esp32
 esp32_pkg="$(arduino-cli config get directories.data)/packages/esp32"
-boot_app0=$(find "$esp32_pkg" -name boot_app0.bin | head -1)
+# `|| true` keeps a missing/unreadable $esp32_pkg from tripping `set -e` here:
+# under pipefail a failed `find` still fails the whole pipeline even though
+# `head` exits 0, which would otherwise kill the script before the explicit
+# "not found" diagnostic below ever runs.
+boot_app0=$(find "$esp32_pkg" -name boot_app0.bin 2>/dev/null | head -1 || true)
 [ -n "$boot_app0" ] || { echo "boot_app0.bin not found in esp32 core" >&2; exit 1; }
 # Resolve esptool without assuming it's pip-installed into whatever python3
 # resolves to: prefer a standalone `esptool` on PATH, else the esptool binary
 # bundled with the esp32 core itself (installed above, so always present),
 # else fall back to `python3 -m esptool` as a last resort.
-bundled_esptool=$(find "$esp32_pkg/tools/esptool_py" -name esptool -type f | head -1)
+bundled_esptool=$(find "$esp32_pkg/tools/esptool_py" -name esptool -type f 2>/dev/null | head -1 || true)
 if command -v esptool >/dev/null 2>&1; then
   esptool_cmd=(esptool)
 elif [ -n "$bundled_esptool" ]; then
