@@ -181,7 +181,7 @@ endforeach()
 
 # Onboarded targets: board variants (which run a shared firmware) and standalone
 # apps. Each provides its own CMakeLists via add_subdirectory.
-foreach(_t waveshare_amoled_216_c6 waveshare_amoled_216_c6_buddy waveshare_amoled_18 sample_gfx cyd cyd_tft)
+foreach(_t waveshare_amoled_216_c6 waveshare_amoled_216_c6_buddy waveshare_amoled_216 waveshare_amoled_18 sample_gfx cyd cyd_tft)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/targets/${_t}/CMakeLists.txt)
         add_subdirectory(targets/${_t})
     endif()
@@ -248,6 +248,10 @@ if(TARGET clawdmeter_fw)
     target_link_libraries(sim_itests_amoled18 PRIVATE cli_lib)
     link_sim_targets(sim_itests_amoled18)
 
+    add_executable(sim_itests_amoled216 tests/itest_main.cpp tests/itest_amoled216.cpp)
+    target_link_libraries(sim_itests_amoled216 PRIVATE cli_lib)
+    link_sim_targets(sim_itests_amoled216)
+
     # The run-session daemon driving an LVGL target end to end: same one-boot-
     # per-process constraint, so it gets its own executable too.
     add_executable(sim_itests_daemon tests/itest_main.cpp tests/itest_daemon.cpp)
@@ -278,6 +282,7 @@ add_test(NAME sim_tests COMMAND sim_tests)
 add_test(NAME sim_itests COMMAND sim_itests)
 if(TARGET sim_itests_amoled18)
     add_test(NAME sim_itests_amoled18 COMMAND sim_itests_amoled18)
+    add_test(NAME sim_itests_amoled216 COMMAND sim_itests_amoled216)
 endif()
 if(TARGET sim_itests_daemon)
     add_test(NAME sim_itests_daemon COMMAND sim_itests_daemon)
