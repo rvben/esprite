@@ -68,6 +68,7 @@ add_library(agentgauge_fw STATIC
     ${AG}/font_inter_16.c
     ${AG}/font_inter_24.c
     ${AG}/font_inter_48.c
+    ${AG}/font_inter_64.c
     # Sim board adapter: the firmware's hal/*.h contract bound to the virtual
     # peripherals (framebuffer, injected touch/button/battery state).
     ${CMAKE_CURRENT_LIST_DIR}/board_sim/board_caps.cpp
