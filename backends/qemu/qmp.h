@@ -11,6 +11,14 @@ struct QmpClient {
     QmpClient() = default;
     ~QmpClient();
 
+    // Owns an open fd: copying would shallow-copy it, giving two owners that
+    // both close() on destruction (double-close UB). Not part of the brief's
+    // interface, but required for the destructor above to be safe. Holding a
+    // QmpClient by value as a member is still fine; only copying is barred -
+    // move it (or hold it behind a pointer) if that is ever needed.
+    QmpClient(const QmpClient&) = delete;
+    QmpClient& operator=(const QmpClient&) = delete;
+
     // Connects to socket_path, reads the {"QMP":...} greeting, sends
     // {"execute":"qmp_capabilities"} and waits for its {"return":{}} before
     // returning. On any failure (connect refused, greeting malformed,

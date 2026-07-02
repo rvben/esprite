@@ -45,6 +45,7 @@ struct FakeQmpServer {
     std::map<std::string, std::string> returns;   // cmd -> raw "return" JSON value
     std::map<std::string, std::string> errors;     // cmd -> "error" desc
     bool silent_after_negotiate = false;            // simulate a hung QEMU: negotiate, then never reply
+    bool silent_before_greeting = false;            // accept, then never send the {"QMP":...} greeting
 
     FakeQmpServer() {
         char tmpl[] = "/tmp/esprite_qmp_XXXXXX";
@@ -84,6 +85,16 @@ struct FakeQmpServer {
     void serve_one() {
         int fd = accept(listen_fd, nullptr, nullptr);
         if (fd < 0) return;
+
+        if (silent_before_greeting) {
+            // The connection itself succeeds instantly (a real listening
+            // unix socket, no network latency), so this exercises the
+            // bounded poll()-wait inside connect_unix's greeting read, not
+            // the synchronous connect()-failure path a dead socket path hits.
+            std::this_thread::sleep_for(std::chrono::milliseconds(600));
+            ::close(fd);
+            return;
+        }
 
         fq_send_line(fd, R"({"QMP":{"version":{"qemu":{"major":8,"minor":0,"micro":0},"package":""},"capabilities":[]}})");
 
@@ -134,6 +145,18 @@ TEST_CASE("qmp reports connect timeout on a dead socket") {
     QmpClient c;
     std::string err;
     CHECK(!c.connect_unix("/nonexistent/qmp.sock", 200, &err));
+    CHECK(!err.empty());
+}
+
+TEST_CASE("qmp connect times out waiting for the greeting when the peer accepts but stays silent") {
+    // Unlike the dead-socket case above (which fails synchronously in
+    // connect() with ENOENT), this connects successfully and then exercises
+    // the actual poll()-based read deadline inside connect_unix.
+    FakeQmpServer srv;
+    srv.silent_before_greeting = true;
+    QmpClient c;
+    std::string err;
+    CHECK(!c.connect_unix(srv.path(), 150, &err));
     CHECK(!err.empty());
 }
 
