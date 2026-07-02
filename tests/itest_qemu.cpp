@@ -89,6 +89,13 @@ TEST_CASE("C3 hello_world: two icount runs produce identical serial") {
         REQUIRE_MESSAGE(p.start(s, &err), err);
         std::string out = pump_until(p, "Restarting now.", 30000);
         p.stop();
+        // The actual boots-and-orderly-shutdown gate: without this, a
+        // regression that hangs partway through boot (e.g. right after
+        // printing "Hello world!" but before completing the countdown)
+        // would still pass, since pump_until returns the partial output on
+        // a timeout rather than failing outright.
+        REQUIRE_MESSAGE(out.find("Restarting now.") != std::string::npos,
+                         "never reached the restart marker within 30s; captured: " + out);
         REQUIRE(out.find("Hello world!") != std::string::npos);
         return out.substr(0, out.find("Restarting now."));
     };
@@ -117,5 +124,12 @@ TEST_CASE("ESP32 arduino image boots and ticks") {
     REQUIRE_MESSAGE(p.start(s, &err), err);
     std::string out = pump_until(p, "tick 2", 30000);
     p.stop();
+    // Require the actual marker pump_until was told to wait for, not just
+    // the earlier boot banner: pump_until returns the partial output on a
+    // 30s timeout rather than failing, so asserting only on
+    // "arduino_tick boot" would let a hang between boot and the second tick
+    // pass silently.
+    REQUIRE_MESSAGE(out.find("tick 2") != std::string::npos,
+                     "never reached 'tick 2' within 30s; captured: " + out);
     CHECK(out.find("arduino_tick boot") != std::string::npos);
 }
