@@ -58,6 +58,7 @@ esprite_warnings(core)
 add_library(peripherals STATIC
     peripherals/display/framebuffer.cpp
     peripherals/display/screenshot.cpp
+    peripherals/display/window_layout.cpp
     peripherals/input/sim_input.cpp
     peripherals/ble/sim_ble.cpp
     peripherals/gfx/arduino_gfx.cpp
@@ -247,6 +248,7 @@ add_executable(sim_tests
     tests/test_ble.cpp
     tests/test_framebuffer.cpp
     tests/test_screenshot.cpp
+    tests/test_window_layout.cpp
     tests/test_target.cpp
     tests/test_lvgl_smoke.cpp
     tests/test_gfx.cpp
