@@ -55,9 +55,10 @@ jobs:
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
+      # No tag ref here: the manifests are version-independent, and a
+      # dispatched backfill tag may predate packaging/. Only the version
+      # string comes from the tag.
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag || github.ref }}
       - name: Stamp the version from the tag
         run: |
           VERSION="${TAG#v}"
