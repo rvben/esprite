@@ -42,6 +42,17 @@ target_include_directories(shims PUBLIC
 target_link_libraries(shims PUBLIC third_party)
 esprite_warnings(shims)
 
+# Core runtime + target registry. Declared before peripherals (below), which
+# links against it.
+add_library(core STATIC
+    core/target.cpp
+    core/runtime.cpp
+    core/backend.cpp
+)
+target_include_directories(core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core)
+target_link_libraries(core PUBLIC shims)
+esprite_warnings(core)
+
 # Virtual peripherals (display framebuffer, PNG screenshot, injected input bus,
 # generic Arduino_GFX-to-framebuffer shim).
 add_library(peripherals STATIC
@@ -58,18 +69,18 @@ target_include_directories(peripherals PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/ble
     ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/gfx
     ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/tft_espi)
-target_link_libraries(peripherals PUBLIC third_party)
+# sim_input.cpp and sim_ble.cpp register a core/runtime.cpp boot hook
+# (sim_on_boot) to reset their state every sim_boot. That is a real link
+# dependency on core that was missing here; declaring it (rather than relying
+# on core happening to already be pulled in by something else in the same
+# link) is what lets GNU ld place core's archive after peripherals's, since
+# ld resolves archives in a single left-to-right pass and never revisits one
+# it already scanned. Executables that never call sim_boot() directly (e.g.
+# sim_itests_qemu, which only drives the QEMU backend) had nothing else pull
+# in core/runtime.cpp.o before peripherals needed its symbol, so the link
+# failed with GNU ld while ld64 (macOS) tolerated the missing edge.
+target_link_libraries(peripherals PUBLIC third_party core)
 esprite_warnings(peripherals)
-
-# Core runtime + target registry.
-add_library(core STATIC
-    core/target.cpp
-    core/runtime.cpp
-    core/backend.cpp
-)
-target_include_directories(core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core)
-target_link_libraries(core PUBLIC shims)
-esprite_warnings(core)
 
 # LVGL built from source with the sim lv_conf.h. Pinned to 9.5.0 for a stable
 # core API surface (lv_font_t has static_bitmap).
