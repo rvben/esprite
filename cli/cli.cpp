@@ -28,8 +28,6 @@
 #include <cctype>
 #include <csignal>
 #include <unistd.h>
-#include <poll.h>
-#include <cerrno>
 
 // Steps to run after a serial injection before checking for a match: enough
 // for the firmware to react and print, without an unbounded wait. Same value
@@ -87,13 +85,26 @@ struct BackendShutdownGuard {
 static volatile sig_atomic_t g_interrupted = 0;
 static bool sim_interrupted() { return g_interrupted != 0; }
 
-// Idempotent: signal() with the same handler is a harmless no-op on repeat,
-// so this is safe to call from both esprite_main and esprite_daemon (a
-// public entry point tests call directly, bypassing esprite_main) and safe
-// across the repeated in-process esprite_main calls the test suite makes.
+// Uses sigaction (not plain signal()) so SA_RESTART can be left unset: with
+// it set - the default plain signal() gives on both Linux and macOS - a
+// blocking call interrupted by one of these signals is transparently resumed
+// by the kernel instead of returning, which left esprite_daemon's fgets()
+// loop (its steady state; see esprite_daemon) unable to ever notice
+// g_interrupted while waiting for the next command line. Without
+// SA_RESTART, that same read fails with EINTR and stdio surfaces it as
+// fgets() returning NULL, which the daemon loop already treats like EOF.
+// Idempotent: sigaction with the same disposition is a harmless no-op on
+// repeat, so this is safe to call from both esprite_main and esprite_daemon
+// (a public entry point tests call directly, bypassing esprite_main) and
+// safe across the repeated in-process esprite_main calls the test suite
+// makes.
 static void install_signal_handlers() {
-    signal(SIGINT,  [](int) { g_interrupted = 1; });
-    signal(SIGTERM, [](int) { g_interrupted = 1; });
+    struct sigaction sa {};
+    sa.sa_handler = [](int) { g_interrupted = 1; };
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;   // deliberately no SA_RESTART - see comment above
+    sigaction(SIGINT, &sa, nullptr);
+    sigaction(SIGTERM, &sa, nullptr);
 }
 
 // Commands a qemu-backed target currently supports (tier 1: serial
@@ -848,32 +859,19 @@ int esprite_daemon(FILE* in, FILE* out) {
     bool booted = false;
     bool is_qemu = false;
     // fgets() below blocks waiting for the next command line, which is where
-    // this loop spends nearly all of its time. Plain signal() leaves
-    // SA_RESTART set on both Linux and macOS, so a blocked fgets() silently
-    // resumes after the handler runs instead of returning - a SIGINT/SIGTERM
-    // sent to a running `esprite run` session (or a qemu serve loop's daemon
-    // sibling) would set g_interrupted but never be noticed here, hanging
-    // forever instead of shutting down. Gate the read with a bounded poll()
-    // that rechecks sim_interrupted() every spin instead, matching the same
-    // pattern the qemu boot's wait loops already use (Important 1). fileno(in)
-    // fails (-1) for the fmemopen()-backed FILE* the test suite drives this
-    // function with directly; that path skips the gate since fgets() on a
-    // fully-buffered memory stream never blocks anyway.
-    int in_fd = fileno(in);
-    for (;;) {
-        if (in_fd >= 0) {
-            bool ready = false;
-            for (;;) {
-                if (sim_interrupted()) goto daemon_interrupted;
-                pollfd pfd{in_fd, POLLIN, 0};
-                int rv = poll(&pfd, 1, 200);
-                if (rv > 0) { ready = true; break; }           // data, EOF, or HUP pending
-                if (rv < 0 && errno != EINTR) break;            // real poll() error: fall through to fgets
-                // rv == 0 (200ms timeout) or EINTR: loop back and recheck sim_interrupted()
-            }
-            if (!ready) break;
-        }
-        if (!fgets(line, sizeof(line), in)) break;
+    // this loop spends nearly all of its time. install_signal_handlers()
+    // installs SIGINT/SIGTERM via sigaction with SA_RESTART cleared (not
+    // plain signal(), which defaults to SA_RESTART on both Linux and macOS),
+    // so a signal landing while fgets() is blocked interrupts its underlying
+    // read() with EINTR instead of transparently resuming it; stdio
+    // propagates that as fgets() returning NULL, same as real EOF, which
+    // this loop already treats as "stop serving" further down. That relies
+    // on fgets() itself noticing the interrupt rather than a separate
+    // readiness check on the raw fd - an earlier version of this fix polled
+    // the fd directly, but that ignored bytes fgets() had already pulled
+    // into stdio's internal buffer, deadlocking a session that pipes several
+    // commands in one write() without an intervening EOF or signal.
+    while (fgets(line, sizeof(line), in)) {
         // A line beyond the buffer would otherwise be parsed as two commands,
         // desyncing 1-in/1-out reply pairing. Drain it and reply with one error.
         if (!strchr(line, '\n') && !feof(in)) {
@@ -1040,6 +1038,5 @@ int esprite_daemon(FILE* in, FILE* out) {
         }
         fflush(out);
     }
-daemon_interrupted:
     return 0;
 }
