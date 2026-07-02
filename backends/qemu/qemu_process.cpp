@@ -163,6 +163,11 @@ bool QemuProcess::start(const QemuSpec& spec, std::string* err) {
             stop();
             return false;
         }
+        if (spec.interrupted && spec.interrupted()) {
+            set_err(err, "interrupted");
+            stop();
+            return false;
+        }
         if (Clock::now() >= deadline) {
             set_err(err, "timed out waiting for QMP to become ready: " + connect_err);
             stop();

@@ -109,8 +109,20 @@ struct QemuBackend : SimBackend {
         // execution; only verified for riscv32 so far, xtensa stays wall-clock.
         spec.icount = std::string(t->qemu->arch) == "riscv32";
         spec.qmp_socket = socket_dir_ + "/qmp.sock";
+        spec.interrupted = interrupted_;   // lets start()'s QMP retry loop bail early on SIGINT/SIGTERM
 
         if (!process_.start(spec, err)) { cleanup_dir(); return false; }
+
+        if (interrupted_ && interrupted_()) {
+            // Signaled between spawn and here (or start() itself already saw
+            // it and unwound via spec.interrupted). Report it the same way,
+            // stop the child, and let boot_or_die's backend_unavailable path
+            // unwind normally so BackendShutdownGuard still runs.
+            set_err(err, "interrupted");
+            process_.stop();
+            cleanup_dir();
+            return false;
+        }
 
         // Boot success = spawned + QMP negotiated + query-status confirms the
         // machine is actually running (not just that the socket answered).
@@ -136,7 +148,11 @@ struct QemuBackend : SimBackend {
             return false;
         }
 
-        settle_ms(kBootSettleMs);   // best-effort warmup; see the comment above
+        if (!settle_ms(kBootSettleMs)) {   // best-effort warmup; see the comment above
+            set_err(err, "interrupted");
+            shutdown();
+            return false;
+        }
         return true;
     }
 
@@ -145,10 +161,15 @@ struct QemuBackend : SimBackend {
         cleanup_dir();
     }
 
+    // Returns false if interrupted before the deadline (an early bail-out,
+    // not a pump failure); boot() treats that as a failed boot. Callers that
+    // only want the warmup pump (e.g. cli.cpp's serial settle) ignore the
+    // return value, same as before this counted interruption.
     bool settle_ms(unsigned ms) override {
         auto deadline = Clock::now() + std::chrono::milliseconds(ms);
         process_.pump();
         while (Clock::now() < deadline) {
+            if (interrupted_ && interrupted_()) return false;
             usleep(10000);
             process_.pump();
         }
@@ -163,6 +184,8 @@ struct QemuBackend : SimBackend {
 
     const char* name() const override { return "qemu"; }
 
+    void set_interrupt_check(bool (*fn)()) { interrupted_ = fn; }
+
 private:
     // Removes the mkdtemp scratch dir this boot created (its qmp socket, then
     // the directory itself). Idempotent: safe when nothing was ever created.
@@ -175,10 +198,16 @@ private:
 
     QemuProcess process_;
     std::string socket_dir_;
+    // Optional CLI-supplied signal-flag accessor; null when nothing wired one
+    // up (e.g. a unit test that never calls the (interrupted) overload of
+    // qemu_backend_install), in which case boot's wait loops just never bail
+    // early, matching the pre-signal-handling behavior.
+    bool (*interrupted_)() = nullptr;
 };
 
 static QemuBackend g_qemu;
 
-void qemu_backend_install() {
+void qemu_backend_install(bool (*interrupted)()) {
+    g_qemu.set_interrupt_check(interrupted);
     sim_backend_register(BACKEND_QEMU, &g_qemu);
 }

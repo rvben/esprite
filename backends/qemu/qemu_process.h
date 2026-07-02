@@ -15,6 +15,12 @@ struct QemuSpec {
     std::string flash_image;   // merged flash image (raw, mtd)
     bool        icount = false;        // -icount shift=3,align=off,sleep=off
     std::string qmp_socket;            // unix socket path (caller-chosen dir)
+    // Optional poll hook for start()'s bounded QMP connect retry: checked each
+    // spin so a SIGINT/SIGTERM during boot bails out early instead of blocking
+    // through the full window. Backends/qemu must not include cli headers, so
+    // the caller (cli.cpp, via qemu_backend_install) hands its own signal-flag
+    // accessor down through here rather than this layer reaching up for one.
+    bool (*interrupted)() = nullptr;
 };
 
 // Pure and unit-testable: builds the exact child argv from spec. No side

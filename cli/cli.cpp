@@ -67,9 +67,32 @@ static void serial_settle(int native_steps) {
 // so it is safe to declare one of these in both esprite_main (which calls
 // esprite_daemon for the `run` command) and esprite_daemon itself (tests
 // call it directly, bypassing esprite_main).
+//
+// For that guard to actually run on Ctrl-C/SIGTERM, default signal
+// disposition (terminate without unwinding the stack) must never be allowed
+// to fire while a qemu child might be alive - which spans the whole process,
+// not just the serve loop, since a plain `esprite serial ...` on a qemu
+// target also spawns one during boot. g_interrupted is the process-wide flag
+// the handlers below set; sim_interrupted() is the accessor every bounded
+// wait loop in this process (this file's serial_settle, and - via the
+// function pointer qemu_backend_install() takes, since backends/qemu must
+// not include cli headers - the qemu backend's own boot/settle loops) polls
+// to bail out early so control returns here and the guard's destructor runs.
 struct BackendShutdownGuard {
     ~BackendShutdownGuard() { sim_backend().shutdown(); }
 };
+
+static volatile sig_atomic_t g_interrupted = 0;
+static bool sim_interrupted() { return g_interrupted != 0; }
+
+// Idempotent: signal() with the same handler is a harmless no-op on repeat,
+// so this is safe to call from both esprite_main and esprite_daemon (a
+// public entry point tests call directly, bypassing esprite_main) and safe
+// across the repeated in-process esprite_main calls the test suite makes.
+static void install_signal_handlers() {
+    signal(SIGINT,  [](int) { g_interrupted = 1; });
+    signal(SIGTERM, [](int) { g_interrupted = 1; });
+}
 
 // Commands a qemu-backed target currently supports (tier 1: serial
 // output/input and the serve lifecycle, plus session bookkeeping). Everything
@@ -304,7 +327,12 @@ static int boot_or_die(int argc, char** argv) {
         return fail("unknown_target", "unknown target '" + t + "'", 2);
     sim_backend_select(target);
     std::string err;
-    if (!sim_backend().boot(target, &err))   // sim_boot resets UI refs via its boot hook
+    // Routes to the backend selected above: native boots in-process and
+    // resets UI refs via its boot hook (sim_boot); qemu spawns a child and
+    // confirms it over QMP instead. Either way "false" also covers a SIGINT/
+    // SIGTERM landing mid-boot (err == "interrupted"), not just a real
+    // failure - see sim_interrupted().
+    if (!sim_backend().boot(target, &err))
         // target exists, so this is a real boot failure (e.g. qemu env/spawn/QMP),
         // not an unknown key - surface the backend's own message.
         return fail("backend_unavailable", err.empty() ? ("could not boot '" + t + "'") : err, 2);
@@ -364,7 +392,9 @@ static std::string bounded_array(const std::string& arr, int offset, int limit) 
            ",\"truncated\":" + jbool(truncated) + "}";
 }
 int esprite_main(int argc, char** argv) {
-    qemu_backend_install();   // core never links qemu code directly; this is the one wiring point
+    g_interrupted = 0;         // each invocation starts fresh; tests call this repeatedly in-process
+    install_signal_handlers(); // before qemu_backend_install: a qemu boot's wait loops must see g_interrupted
+    qemu_backend_install(sim_interrupted);   // core never links qemu code directly; this is the one wiring point
     BackendShutdownGuard backend_guard;
     set_output_mode(argc, argv);
     if (argc < 2 || !strcmp(argv[1], "--help") || !strcmp(argv[1], "help")) {
@@ -510,14 +540,13 @@ int esprite_main(int argc, char** argv) {
         }
 
         // Ctrl-C / SIGTERM exit the loop for an orderly shutdown (window
-        // closed, exit code 0) instead of dying mid-frame.
-        static volatile sig_atomic_t stop;
-        stop = 0;
-        signal(SIGINT,  [](int) { stop = 1; });
-        signal(SIGTERM, [](int) { stop = 1; });
-
+        // closed, exit code 0) instead of dying mid-frame. Handlers are
+        // already installed process-wide (esprite_main, before this command
+        // even resolved its target); g_interrupted is guaranteed 0 here since
+        // an interrupted boot above would have already returned
+        // backend_unavailable instead of reaching this loop.
         auto last = std::chrono::steady_clock::now();
-        while (!stop) {
+        while (!sim_interrupted()) {
             sim_backend().tick();          // pump handleClient() so POSTs land
             ble_bridge_tick(ble);          // null-safe: shuttle BLE lines
             bool paced = false;
@@ -804,9 +833,14 @@ int esprite_daemon(FILE* in, FILE* out) {
     // tests (and future callers) invoke directly - without this, a qemu boot
     // in such a process would find BACKEND_QEMU unregistered and silently
     // fall back to native (core/backend.cpp's sim_backend_select), which
-    // trivially "succeeds" instead of surfacing backend_unavailable.
-    // Idempotent: safe alongside esprite_main's own call in the same process.
-    qemu_backend_install();
+    // trivially "succeeds" instead of surfacing backend_unavailable. The same
+    // reasoning applies to the signal-flag wiring: a direct caller's qemu
+    // boot needs g_interrupted reset and the handlers installed too, or a
+    // SIGINT during it would have nothing to bail its wait loops out early.
+    // Idempotent: safe alongside esprite_main's own calls in the same process.
+    g_interrupted = 0;
+    install_signal_handlers();
+    qemu_backend_install(sim_interrupted);
     BackendShutdownGuard backend_guard;   // tests call esprite_daemon directly, bypassing esprite_main
     char line[16384];
     bool booted = false;
