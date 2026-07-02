@@ -247,13 +247,14 @@ static bool is_active(SimWindow* win, const SimButton* b) {
     return false;
 }
 
-// Opening an overlay (help or panel) must not leave a keyboard-held button
-// stuck: a closed control can't keep asserting its action, and the physical
-// KEYUP for that key may arrive while the overlay is still open (which the
-// per-button KEYUP handling below only processes for keys it still
-// considers held, so this is the one place that ever clears the held state
-// early). Called at the moment help_open/panel_open transitions to true.
-static void release_all_key_holds(SimWindow* win) {
+// Opening an overlay (help or panel) must not leave a button held via either
+// input method stuck: a closed control can't keep asserting its action, and
+// the matching physical release (KEYUP, or MOUSEBUTTONUP) may arrive while
+// the overlay is still open - the per-button KEYUP loop and the
+// MOUSEBUTTONUP handler each only fire release_action for a hold they still
+// consider live, so this is the one place that ever clears held state early.
+// Called at the moment help_open/panel_open transitions to true.
+static void release_all_holds(SimWindow* win) {
     for (int i = 0; i < win->layout.nub_count; ++i) {
         if (win->key_held[i]) {
             win->key_held[i] = false;
@@ -261,16 +262,22 @@ static void release_all_key_holds(SimWindow* win) {
             if (win->mouse_held != i) release_action(win, &win->board->buttons[i]);
         }
     }
+    if (win->mouse_held >= 0) {
+        int i = win->mouse_held;
+        win->mouse_held = -1;
+        // Don't clear a button the keyboard is still holding.
+        if (!win->key_held[i]) release_action(win, &win->board->buttons[i]);
+    }
 }
 
 // help_open/panel_open are mutually exclusive; these four helpers are the
-// only places either flag changes, so every open clears held keyboard
+// only places either flag changes, so every open clears held mouse/keyboard
 // buttons and every panel-close clears bat_dragging (otherwise Esc/backtick/
 // an outside click while mid-drag would leave the slider silently tracking
 // mouse motion the closed panel no longer shows).
-static void open_help(SimWindow* win)  { win->help_open = true;  win->panel_open = false; release_all_key_holds(win); }
+static void open_help(SimWindow* win)  { win->help_open = true;  win->panel_open = false; release_all_holds(win); }
 static void close_help(SimWindow* win) { win->help_open = false; }
-static void open_panel(SimWindow* win)  { win->panel_open = true;  win->help_open = false; release_all_key_holds(win); }
+static void open_panel(SimWindow* win)  { win->panel_open = true;  win->help_open = false; release_all_holds(win); }
 static void close_panel(SimWindow* win) { win->panel_open = false; win->bat_dragging = false; }
 
 SimWindow* sim_window_open(const char* title, const BoardDesc* board, int scale) {
