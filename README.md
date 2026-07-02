@@ -63,7 +63,18 @@ lets you drive it: **mouse** = touch (click and drag), **space** = PRIMARY
 button, **tab** = SECONDARY, **p** = PWR, **Esc** = quit. PWR follows the
 hardware's hold semantics: a quick press or click is a short press; holding
 past 1.5 s emits the long-press edge (hold ~3 s then release for Clawdmeter's
-pair gesture). Ctrl-C stops `serve` cleanly. Point a live bridge at
+pair gesture). Ctrl-C stops `serve` cleanly.
+
+For BLE firmwares, `serve --ble-port N` additionally exposes the virtual BLE
+link as newline-delimited JSON on a localhost TCP socket: connecting acts as a
+bonded central, lines written go to the device, and the device's lines stream
+back. Any host process (the desktop companion via a small adapter, a script,
+even `nc`) can drive the simulated device live:
+
+```bash
+esprite serve --target waveshare_amoled_216_c6_buddy --ble-port 9091 --window &
+printf '{"cmd":"status"}\n' | nc 127.0.0.1 9091
+``` Point a live bridge at
 the same port and the real data updates in the window in real time.
 
 The window is optional: it is only compiled when SDL2 is found at configure time

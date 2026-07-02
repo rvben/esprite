@@ -7,6 +7,7 @@
 #include "scenario.h"
 #include "sim_input.h"
 #include "sim_ble.h"
+#include "ble_bridge.h"
 #include "Print.h"
 #include "WebServer.h"
 #include "lvgl_snapshot.h"
@@ -128,7 +129,7 @@ static const std::string kSchema = std::string(R"JSON({
       "output_fields": [ { "name": "serial", "description": "Captured serial text.", "type": "string" } ] },
     { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless.", "mutating": true, "stability": "stable",
       "args": [ { "name": "file", "description": "Scenario JSON path.", "type": "string", "required": true } ] },
-    { "name": "serve", "description": "Boot and keep pumping so a live bridge can POST; --window opens an interactive SDL window (mouse=touch, on-screen buttons + battery/USB/rotate controls). Human logs on stderr.", "mutating": true, "stability": "stable" },
+    { "name": "serve", "description": "Boot and keep pumping so a live bridge can drive the device. HTTP: a bridge POSTs to the firmware's webserver (--port). BLE: --ble-port N exposes the virtual BLE link as newline-delimited JSON on a localhost TCP socket (connect = bonded central, lines in = host->device, device lines stream back; one client at a time). --window opens an interactive SDL window (mouse=touch, on-screen buttons + battery/USB/rotate controls). Human logs on stderr.", "mutating": true, "stability": "stable" },
     { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), button, battery, rotate, gpio, ble (sub+data/passkey), snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
   ],
   "errors": [
@@ -148,7 +149,7 @@ static const std::string kSchema = std::string(R"JSON({
 // positionals (serial send text, for example) can themselves start with dashes.
 static const char* kValOpts[]  = {"--target", "--steps", "--path", "--shot",
                                   "--port", "--interval-ms", "--scale", "--ref",
-                                  "--passkey",
+                                  "--passkey", "--ble-port",
                                   "--output", "-o", "--limit", "--offset", "--fields"};
 static const char* kFlagOpts[] = {"--charging", "--no-vbus", "--window", "--json", "--help", "--version"};
 
@@ -200,7 +201,7 @@ static int validate_options(int argc, char** argv) {
     static const struct { const char* name; long min, max; } kNumericOpts[] = {
         {"--steps", 0, 1000000}, {"--port", 0, 65535}, {"--interval-ms", 1, 3600000},
         {"--scale", 1, 16}, {"--limit", 0, 1000000}, {"--offset", 0, 1000000},
-        {"--passkey", 1, 999999},
+        {"--passkey", 1, 999999}, {"--ble-port", 0, 65535},
     };
     for (int i = 2; i < argc; ++i) {
         const char* a = argv[i];
@@ -390,6 +391,18 @@ int esprite_main(int argc, char** argv) {
                 shot ? "" : " (pass --shot to capture frames)");
         if (shot) sim_screenshot_png(shot);
 
+        // Live BLE bridge: expose the virtual link on a localhost socket so a
+        // real host process can drive a BLE firmware (newline-delimited JSON).
+        BleBridge* ble = nullptr;
+        if (const char* bp = opt_val(argc, argv, "--ble-port")) {
+            if (!sim_ble_available())
+                return fail("unsupported", "this firmware has no BLE (boot a buddy target)", 7);
+            ble = ble_bridge_open(atoi(bp));
+            if (!ble) return fail("bind_failed", std::string("could not bind BLE bridge port ") + bp, 3);
+            fprintf(stderr, "esprite: BLE bridge at tcp://127.0.0.1:%d (newline-delimited JSON)\n",
+                    ble_bridge_port(ble));
+        }
+
         // Ctrl-C / SIGTERM exit the loop for an orderly shutdown (window
         // closed, exit code 0) instead of dying mid-frame.
         static volatile sig_atomic_t stop;
@@ -400,6 +413,7 @@ int esprite_main(int argc, char** argv) {
         auto last = std::chrono::steady_clock::now();
         while (!stop) {
             sim_run_steps(4);              // pump handleClient() so POSTs land
+            ble_bridge_tick(ble);          // null-safe: shuttle BLE lines
             bool paced = false;
 #ifdef HAVE_SDL2
             if (win) {
@@ -423,6 +437,7 @@ int esprite_main(int argc, char** argv) {
 #ifdef HAVE_SDL2
         if (win) sim_window_close(win);
 #endif
+        ble_bridge_close(ble);
         return 0;
     }
 

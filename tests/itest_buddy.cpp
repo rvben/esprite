@@ -5,8 +5,13 @@
 #include "sim_input.h"
 #include "sim_ble.h"
 #include "lvgl_snapshot.h"
+#include "ble_bridge.h"
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 
 // End-to-end integration of the BLE Hardware Buddy flavor: the real
@@ -108,12 +113,52 @@ TEST_CASE("time sync turns the title into a live wall clock") {
     CHECK(lvgl_snapshot_json().find("12:34") != std::string::npos);
 }
 
+TEST_CASE("the BLE bridge shuttles lines between a TCP client and the firmware") {
+    // The bridge is what `serve --ble-port` pumps: a localhost socket where a
+    // real host process speaks newline-delimited JSON to the virtual device.
+    BleBridge* bridge = ble_bridge_open(0);
+    REQUIRE(bridge != nullptr);
+    int port = ble_bridge_port(bridge);
+    REQUIRE(port > 0);
+
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    a.sin_port = htons((uint16_t)port);
+    REQUIRE(connect(fd, (sockaddr*)&a, sizeof(a)) == 0);
+    timeval tv{0, 100000};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    const char* req = "{\"cmd\":\"status\"}\n";
+    REQUIRE(send(fd, req, strlen(req), 0) == (ssize_t)strlen(req));
+
+    // Pump bridge + firmware together until the device's reply streams back.
+    std::string resp;
+    char rb[2048];
+    for (int i = 0; i < 30 && resp.find('\n') == std::string::npos; ++i) {
+        ble_bridge_tick(bridge);
+        sim_run_steps(8);
+        ble_bridge_tick(bridge);
+        ssize_t n = recv(fd, rb, sizeof(rb), 0);
+        if (n > 0) resp.append(rb, (size_t)n);
+    }
+    CHECK(resp.find("\"ack\":\"status\"") != std::string::npos);
+
+    close(fd);
+    ble_bridge_tick(bridge);   // notices the EOF and drops the link
+    ble_bridge_close(bridge);
+}
+
 // Real firmware state, linked straight from idle.cpp.
 extern bool idle_is_asleep(void);
 
 TEST_CASE("the device sleeps after the idle timeout and swallows the wake press") {
-    // Arm a pending prompt first (its arrival counts as activity), then let 30
-    // virtual minutes pass on battery power (sleep is disabled on USB).
+    // Own the link (earlier cases may have dropped it), then arm a pending
+    // prompt (its arrival counts as activity) and let 30 virtual minutes pass
+    // on battery power (sleep is disabled on USB).
+    sim_ble_host_connect(0);
+    sim_settle_ms();
     sim_ble_host_send(
         "{\"prompt\":{\"id\":\"p2\",\"tool\":\"Edit\",\"hint\":\"write file\"}}");
     sim_settle_ms();
