@@ -104,12 +104,16 @@ static const std::string kSchema = std::string(R"JSON({
         { "name": "level", "description": "0 or 1.", "type": "number", "required": true }
       ],
       "example": { "args": ["9", "1", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
-    { "name": "ble", "description": "Drive the virtual BLE link of a BLE firmware (e.g. the Clawdmeter Hardware Buddy), standing in for the desktop app: connect (bonded, or --passkey N to pair; confirm with ble pair), disconnect, send one JSON line, recv device-sent lines, hid captured keyboard reports.", "mutating": true, "stability": "stable",
+    { "name": "ble", "description": "Drive the virtual BLE link of a BLE firmware (e.g. the Clawdmeter Hardware Buddy), standing in for the desktop app. One-shot `ble send` completes the round trip itself: it connects (bonded), delivers the JSON line, and returns the device's replies (add --shot to capture the resulting frame). connect/pair (passkey pairing via --passkey N), disconnect, recv, and hid hold state across commands only inside a run session or scenario.", "mutating": true, "stability": "stable",
       "args": [
         { "name": "sub", "description": "connect|pair|disconnect|send|recv|hid.", "type": "string", "required": true, "enum": ["connect", "pair", "disconnect", "send", "recv", "hid"] },
         { "name": "json", "description": "For send: one JSON line for the device.", "type": "string", "required": false }
       ],
-      "example": { "args": ["send", "{\"tokens_today\":4567}", "--target", "waveshare_amoled_216_c6_buddy"], "stdin": "" } },
+      "example": { "args": ["send", "{\"cmd\":\"status\"}", "--target", "waveshare_amoled_216_c6_buddy"], "stdin": "" },
+      "output_fields": [
+        { "name": "ok", "description": "Delivered.", "type": "boolean" },
+        { "name": "replies", "description": "For send: JSON lines the device sent back.", "type": "string" }
+      ] },
     { "name": "button", "description": "Press a physical button. pwr-long and pwr-release inject the power button's long-press and release edges for hold gestures (advance time with steps between them).", "mutating": true, "stability": "stable",
       "args": [ { "name": "which", "description": "primary|secondary|pwr|pwr-long|pwr-release.", "type": "string", "required": true, "enum": ["primary", "secondary", "pwr", "pwr-long", "pwr-release"] } ],
       "example": { "args": ["primary", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
@@ -557,8 +561,24 @@ int esprite_main(int argc, char** argv) {
             JsonDocument probe;
             if (line.empty() || deserializeJson(probe, line))
                 return fail("bad_args", "ble send needs a valid JSON line", 2);
+            // One-shot invocations boot fresh, so no prior connect can exist:
+            // complete the round trip here over the bonded fast path, and
+            // return whatever the device sent back.
+            if (sim_ble_link_state() != SIM_BLE_CONNECTED)
+                if (ActionError e = apply_ble_connect(0)) return fail(e.kind, e.msg, kind_exit(e.kind));
             if (ActionError e = apply_ble_send(line)) return fail(e.kind, e.msg, kind_exit(e.kind));
-            emit("{\"ok\":true}", "sent");
+            std::string replies = "[", text;
+            bool first = true;
+            for (const std::string& l : sim_ble_host_drain()) {
+                JsonDocument p2;
+                replies += (first ? "" : ",");
+                replies += deserializeJson(p2, l) ? "\"" + json_esc(l) + "\"" : l;
+                first = false;
+                text += l + "\n";
+            }
+            replies += "]";
+            maybe_shot(argc, argv);
+            emit("{\"ok\":true,\"replies\":" + replies + "}", "sent" + (text.empty() ? "" : "\n" + text));
             return 0;
         }
         if (sub == "recv") {

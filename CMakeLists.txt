@@ -275,6 +275,11 @@ if(TARGET clawdmeter_buddy)
     add_executable(sim_itests_buddy tests/itest_main.cpp tests/itest_buddy.cpp)
     target_link_libraries(sim_itests_buddy PRIVATE cli_lib)
     link_sim_targets(sim_itests_buddy)
+
+    # The one-shot ble send round trip (auto-connect, deliver, return replies).
+    add_executable(sim_itests_ble_oneshot tests/itest_main.cpp tests/itest_ble_oneshot.cpp)
+    target_link_libraries(sim_itests_ble_oneshot PRIVATE cli_lib)
+    link_sim_targets(sim_itests_ble_oneshot)
 endif()
 
 enable_testing()
@@ -291,4 +296,5 @@ if(TARGET sim_itests_daemon)
 endif()
 if(TARGET sim_itests_buddy)
     add_test(NAME sim_itests_buddy COMMAND sim_itests_buddy)
+    add_test(NAME sim_itests_ble_oneshot COMMAND sim_itests_ble_oneshot)
 endif()

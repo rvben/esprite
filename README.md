@@ -32,10 +32,11 @@ Requirements: CMake >= 3.20 and a C++17 compiler (Apple clang or gcc/clang on
 Linux). LVGL and ArduinoJson are fetched automatically; doctest and stb are
 vendored.
 
-The two Waveshare targets run the Clawdmeter firmware, which lives in a
-separate checkout: without it the build skips them (with a CMake warning) and
-everything else works. Point `-DCLAWDMETER_SRC=/path/to/firmware/src` at it to
-enable them.
+The Waveshare targets run the Clawdmeter firmware, which lives in a separate
+checkout: without it the build skips them (with a CMake warning) and everything
+else works. Point `-DCLAWDMETER_SRC=/path/to/firmware/src` (or
+`make build CLAWDMETER_SRC=...`) at it to enable them. Prebuilt release
+binaries carry the generic targets only, for the same reason.
 
 ## Screenshots
 

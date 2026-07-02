@@ -1,6 +1,12 @@
 # On a version tag: run the suite, build optimized binaries for macOS (arm64)
 # and Linux (x86_64), and attach the tarballs to the GitHub release for that
 # tag. Every build step is a make target, runnable locally as-is.
+#
+# The binaries carry the generic targets (sample_gfx, cyd, cyd_tft); the
+# Clawdmeter-backed Waveshare targets need a source build against a firmware
+# checkout (README, CLAWDMETER_SRC). Bundling them here would freeze an
+# upstream firmware snapshot into the release, and upstream currently lags
+# the firmware these targets are built for; revisit when upstream syncs.
 name: release
 
 on:
