@@ -141,7 +141,7 @@ static const std::string kSchema = std::string(R"JSON({
     { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless.", "mutating": true, "stability": "stable",
       "args": [ { "name": "file", "description": "Scenario JSON path.", "type": "string", "required": true } ] },
     { "name": "serve", "description": "Boot and keep pumping so a live bridge can drive the device. HTTP: a bridge POSTs to the firmware's webserver (--port). BLE: --ble-port N exposes the virtual BLE link as newline-delimited JSON on a localhost TCP socket (connect = bonded central, lines in = host->device, device lines stream back; one client at a time). --window opens an interactive SDL window (mouse=touch, on-screen buttons + battery/USB/rotate controls). Human logs on stderr.", "mutating": true, "stability": "stable" },
-    { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), swipe (x1,y1,x2,y2), button, battery, rotate, gpio, ble (sub+data/passkey), snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
+    { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), swipe (x1,y1,x2,y2), expect (text/absent/match), button, battery, rotate, gpio, ble (sub+data/passkey), snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
   ],
   "errors": [
     { "kind": "no_target", "description": "No --target and more than one target registered.", "exit_code": 2 },
@@ -151,7 +151,8 @@ static const std::string kSchema = std::string(R"JSON({
     { "kind": "conflict", "description": "An argument or option conflicts with another (e.g. tap given both --ref and x/y).", "exit_code": 5 },
     { "kind": "post_failed", "description": "snapshot could not be delivered to the running target (connect failed or body exceeds the server read size).", "exit_code": 6 },
     { "kind": "unsupported", "description": "The command targets a capability the active board lacks (e.g. battery/rotate on a board without it, or a button the board does not have).", "exit_code": 7 },
-    { "kind": "bad_args", "description": "Missing or invalid arguments for the command.", "exit_code": 2 }
+    { "kind": "bad_args", "description": "Missing or invalid arguments for the command.", "exit_code": 2 },
+    { "kind": "expect_failed", "description": "A scenario/run 'expect' assertion did not hold (text present/absent mismatch).", "exit_code": 8 }
   ]
 })JSON";
 
@@ -748,6 +749,13 @@ int esprite_daemon(FILE* in, FILE* out) {
             else fprintf(out, "{\"ok\":true,\"x\":%d,\"y\":%d}\n", x, y);
         } else if (cmd == "swipe") {
             if (ActionError e = apply_swipe(doc["x1"] | 0, doc["y1"] | 0, doc["x2"] | 0, doc["y2"] | 0))
+                session_err(out, e.kind, e.msg);
+            else fprintf(out, "{\"ok\":true}\n");
+        } else if (cmd == "expect") {
+            std::string m = doc["match"] | "exact";
+            if (m != "exact" && m != "contains")
+                session_err(out, "bad_args", "expect match must be 'exact' or 'contains'");
+            else if (ActionError e = apply_expect(doc["text"] | "", doc["absent"] | "", m == "exact"))
                 session_err(out, e.kind, e.msg);
             else fprintf(out, "{\"ok\":true}\n");
         } else if (cmd == "button") {

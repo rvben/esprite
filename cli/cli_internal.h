@@ -41,6 +41,7 @@ inline int kind_exit(const std::string& kind) {
     if (kind == "post_failed")   return 6;
     if (kind == "unsupported")   return 7;
     if (kind == "bind_failed")   return 3;
+    if (kind == "expect_failed") return 8;
     return 2;   // bad_args, no_target, unknown_target
 }
 

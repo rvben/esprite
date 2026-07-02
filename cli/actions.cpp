@@ -2,6 +2,7 @@
 #include "runtime.h"
 #include "sim_input.h"
 #include "sim_ble.h"
+#include "lvgl_snapshot.h"
 #include "Arduino.h"
 
 const BoardDesc* active_board() {
@@ -93,6 +94,14 @@ ActionError apply_swipe(int x1, int y1, int x2, int y2) {
     }
     sim_input().touch_pressed = false;
     sim_run_steps(8);
+    return {};
+}
+
+ActionError apply_expect(const char* text, const char* absent, bool exact) {
+    if (text && *text && !lvgl_has_text(text, exact))
+        return {"expect_failed", std::string("expected text '") + text + "' not found"};
+    if (absent && *absent && lvgl_has_text(absent, exact))
+        return {"expect_failed", std::string("unexpected text '") + absent + "' present"};
     return {};
 }
 

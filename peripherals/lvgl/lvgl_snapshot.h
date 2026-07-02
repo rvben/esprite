@@ -14,5 +14,9 @@ std::string lvgl_snapshot_json();
 // the tree changes. Returns false if the ref is not in that snapshot.
 bool lvgl_ref_center(const std::string& ref, int* x, int* y);
 
+// True if any visible label on the active screen has text equal to (exact) or
+// containing (!exact) `needle`. Backs the scenario/run `expect` assertion.
+bool lvgl_has_text(const std::string& needle, bool exact);
+
 // Clear the stored refs (call on boot so a new target starts clean).
 void lvgl_snapshot_reset();

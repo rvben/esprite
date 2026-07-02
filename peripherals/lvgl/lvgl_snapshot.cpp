@@ -98,6 +98,21 @@ std::string lvgl_snapshot_json() {
     return out;
 }
 
+bool lvgl_has_text(const std::string& needle, bool exact) {
+    lv_obj_t* scr = current_screen();
+    if (!scr) return false;
+    bool found = false;
+    int counter = 0;
+    walk(scr, counter, [&](int, lv_obj_t* o) {
+        if (found || !lv_obj_check_type(o, &lv_label_class)) return;
+        const char* t = lv_label_get_text(o);
+        if (!t) return;
+        std::string s(t);
+        if (exact ? (s == needle) : (s.find(needle) != std::string::npos)) found = true;
+    });
+    return found;
+}
+
 bool lvgl_ref_center(const std::string& ref, int* x, int* y) {
     // Resolve against the last snapshot's refs. If none was taken this session
     // (e.g. a one-shot `tap --ref`), snapshot the current tree first.

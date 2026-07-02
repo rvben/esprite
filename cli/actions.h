@@ -20,6 +20,10 @@ ActionError apply_tap(int x, int y);
 ActionError apply_swipe(int x1, int y1, int x2, int y2);   // moving press -> LVGL gesture
 ActionError apply_gpio(int pin, int level);
 
+// Assert on the LVGL UI: `text` (if non-empty) must be present, `absent` (if
+// non-empty) must not be; `exact` chooses equals vs contains. Fails 'expect_failed'.
+ActionError apply_expect(const char* text, const char* absent, bool exact);
+
 // BLE link actions (the CLI stands in for the Claude desktop app). All reject
 // with 'unsupported' when the booted firmware never attached a BLE stack.
 ActionError apply_ble_connect(unsigned passkey);   // 0 = bonded fast path

@@ -263,6 +263,11 @@ if(TARGET clawdmeter_fw)
     target_link_libraries(sim_itests_scenario PRIVATE cli_lib)
     link_sim_targets(sim_itests_scenario)
 
+    # `expect` assertions end to end (own executable: one LVGL boot per process).
+    add_executable(sim_itests_scenario_expect tests/itest_main.cpp tests/itest_scenario_expect.cpp)
+    target_link_libraries(sim_itests_scenario_expect PRIVATE cli_lib)
+    link_sim_targets(sim_itests_scenario_expect)
+
     # One-shot ui + bounded-array slicing over a live widget tree.
     add_executable(sim_itests_ui tests/itest_main.cpp tests/itest_ui.cpp)
     target_link_libraries(sim_itests_ui PRIVATE cli_lib)
@@ -292,6 +297,7 @@ endif()
 if(TARGET sim_itests_daemon)
     add_test(NAME sim_itests_daemon COMMAND sim_itests_daemon)
     add_test(NAME sim_itests_scenario COMMAND sim_itests_scenario)
+    add_test(NAME sim_itests_scenario_expect COMMAND sim_itests_scenario_expect)
     add_test(NAME sim_itests_ui COMMAND sim_itests_ui)
 endif()
 if(TARGET sim_itests_buddy)
