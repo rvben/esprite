@@ -3,10 +3,17 @@ RELEASE ?= build-release
 PREFIX  ?= /usr/local
 TARGET  ?= waveshare_amoled_216_c6
 
+# Optional path to the Clawdmeter firmware source; the CMake default is the
+# ../waveshare sibling checkout. CI points this at a fresh upstream clone.
+CMAKE_ARGS := -DCMAKE_BUILD_TYPE=Debug
+ifdef CLAWDMETER_SRC
+CMAKE_ARGS += -DCLAWDMETER_SRC=$(CLAWDMETER_SRC)
+endif
+
 .PHONY: configure build test screenshot scenario goldens release install clean
 
 configure:
-	cmake -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Debug
+	cmake -S . -B $(BUILD) $(CMAKE_ARGS)
 
 build: configure
 	cmake --build $(BUILD) -j

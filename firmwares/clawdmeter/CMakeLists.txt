@@ -51,6 +51,17 @@ foreach(_f ${_cm_present})
     endif()
 endforeach()
 
+# Tolerate version skew in the other direction too: a listed file missing
+# from an older firmware checkout (e.g. CI building against upstream before
+# a local module is pushed) drops out instead of failing configure. Older
+# firmware never references the newer module, so the build stays consistent.
+foreach(_f ${CLAWDMETER_SIM_SOURCES})
+    if(NOT EXISTS ${CM}/${_f})
+        message(STATUS "Clawdmeter at ${CM} predates ${_f}; building without it")
+        list(REMOVE_ITEM CLAWDMETER_SIM_SOURCES ${_f})
+    endif()
+endforeach()
+
 list(TRANSFORM CLAWDMETER_SIM_SOURCES PREPEND ${CM}/)
 
 add_library(clawdmeter_fw STATIC
