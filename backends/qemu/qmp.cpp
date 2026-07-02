@@ -66,6 +66,17 @@ bool read_line(int fd, std::string& rxbuf, Clock::time_point deadline,
     }
 }
 
+// send() flags that stop a write to a peer that already closed its end from
+// raising SIGPIPE (default disposition: terminate the process) instead of
+// just failing the call with EPIPE. Linux supports MSG_NOSIGNAL directly;
+// macOS/BSD have no such flag (SO_NOSIGPIPE is a socket option, set once at
+// connect time instead - see connect_unix).
+#ifdef MSG_NOSIGNAL
+static const int kSendFlags = MSG_NOSIGNAL;
+#else
+static const int kSendFlags = 0;
+#endif
+
 // Writes line plus a trailing newline to fd. The fd is non-blocking (shared
 // with the poll()-based reads), so even a small QMP command can need more
 // than one send() to land fully.
@@ -84,7 +95,7 @@ bool write_line(int fd, const std::string& line, Clock::time_point deadline, std
             return false;
         }
         if (rv == 0) { set_err(err, "timed out writing a QMP command"); return false; }
-        ssize_t n = send(fd, out.data() + off, out.size() - off, 0);
+        ssize_t n = send(fd, out.data() + off, out.size() - off, kSendFlags);
         if (n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) continue;
             set_errno_err(err, "send");
@@ -157,12 +168,23 @@ bool QmpClient::connect_unix(const std::string& socket_path, int timeout_ms, std
     if (s < 0) { set_errno_err(err, "socket"); return false; }
     int flags = fcntl(s, F_GETFL, 0);
     fcntl(s, F_SETFL, flags | O_NONBLOCK);
+#ifdef SO_NOSIGPIPE
+    // macOS/BSD: no MSG_NOSIGNAL send() flag exists, so ask the socket itself
+    // to turn a write to a peer that closed its end into EPIPE instead of
+    // raising SIGPIPE (default disposition: terminate the process).
+    int one = 1;
+    setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#endif
 
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, socket_path.c_str(), sizeof(addr.sun_path) - 1);
 
     if (::connect(s, (sockaddr*)&addr, sizeof(addr)) != 0) {
-        if (errno == EINPROGRESS) {
+        // EINPROGRESS is the POSIX code for "nonblocking connect still
+        // running"; Linux's unix(7) documents AF_UNIX stream connects using
+        // EAGAIN for the same condition instead, so both must be treated as
+        // in-progress rather than a hard failure.
+        if (errno == EINPROGRESS || errno == EAGAIN) {
             pollfd pfd{s, POLLOUT, 0};
             int rv = poll(&pfd, 1, remaining_ms(deadline));
             if (rv <= 0) {
