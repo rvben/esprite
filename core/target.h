@@ -9,6 +9,9 @@ enum SimInputAction {
     ACT_GPIO,          // held  -> digitalRead(gpio) reads high while pressed
 };
 
+// Which physical edge of the device a control sits on, for bezel layout.
+enum SimEdge { EDGE_RIGHT = 0, EDGE_LEFT, EDGE_TOP, EDGE_BOTTOM };
+
 // A physical control on the device (a side button, BOOT/PWR/KEY, A/B, ...).
 // Targets declare their own set so the simulator window is device-accurate.
 struct SimButton {
@@ -16,6 +19,10 @@ struct SimButton {
     SimInputAction action;
     int            gpio;    // pin for ACT_GPIO; ignored for other actions
     char           key;     // optional keyboard shortcut (0 = none)
+    // Defaulted so every existing aggregate initializer in targets/*/board.cpp
+    // (which only lists the four fields above) keeps compiling unchanged.
+    SimEdge        edge = EDGE_RIGHT;  // which device edge holds the control
+    float          pos  = -1.0f;       // 0..1 along that edge; -1 = auto-stack
 };
 
 // A simulated board's runtime description, read by framebuffer sizing, the CLI,

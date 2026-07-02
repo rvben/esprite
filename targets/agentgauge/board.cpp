@@ -10,9 +10,9 @@ void agentgauge_setup();
 void agentgauge_loop();
 
 static const SimButton kButtons[] = {
-    {"PRIMARY",   ACT_PRIMARY,   0, ' '},   // GPIO9  - screen cycle
-    {"PWR",       ACT_PWR,       0, 'p'},   // AXP2101 power button (not read by firmware yet)
-    {"SECONDARY", ACT_SECONDARY, 0, '\t'},  // GPIO10 - brightness cycle
+    {"PRIMARY",   ACT_PRIMARY,   0, ' ',  EDGE_RIGHT, 0.30f},  // GPIO9  - screen cycle
+    {"PWR",       ACT_PWR,       0, 'p',  EDGE_RIGHT, 0.50f},  // AXP2101 power button (not read by firmware yet)
+    {"SECONDARY", ACT_SECONDARY, 0, '\t', EDGE_RIGHT, 0.70f},  // GPIO10 - brightness cycle
 };
 
 static const BoardDesc kBoard = {
