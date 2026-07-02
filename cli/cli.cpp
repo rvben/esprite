@@ -28,6 +28,8 @@
 #include <cctype>
 #include <csignal>
 #include <unistd.h>
+#include <poll.h>
+#include <cerrno>
 
 // Steps to run after a serial injection before checking for a match: enough
 // for the firmware to react and print, without an unbounded wait. Same value
@@ -845,7 +847,33 @@ int esprite_daemon(FILE* in, FILE* out) {
     char line[16384];
     bool booted = false;
     bool is_qemu = false;
-    while (fgets(line, sizeof(line), in)) {
+    // fgets() below blocks waiting for the next command line, which is where
+    // this loop spends nearly all of its time. Plain signal() leaves
+    // SA_RESTART set on both Linux and macOS, so a blocked fgets() silently
+    // resumes after the handler runs instead of returning - a SIGINT/SIGTERM
+    // sent to a running `esprite run` session (or a qemu serve loop's daemon
+    // sibling) would set g_interrupted but never be noticed here, hanging
+    // forever instead of shutting down. Gate the read with a bounded poll()
+    // that rechecks sim_interrupted() every spin instead, matching the same
+    // pattern the qemu boot's wait loops already use (Important 1). fileno(in)
+    // fails (-1) for the fmemopen()-backed FILE* the test suite drives this
+    // function with directly; that path skips the gate since fgets() on a
+    // fully-buffered memory stream never blocks anyway.
+    int in_fd = fileno(in);
+    for (;;) {
+        if (in_fd >= 0) {
+            bool ready = false;
+            for (;;) {
+                if (sim_interrupted()) goto daemon_interrupted;
+                pollfd pfd{in_fd, POLLIN, 0};
+                int rv = poll(&pfd, 1, 200);
+                if (rv > 0) { ready = true; break; }           // data, EOF, or HUP pending
+                if (rv < 0 && errno != EINTR) break;            // real poll() error: fall through to fgets
+                // rv == 0 (200ms timeout) or EINTR: loop back and recheck sim_interrupted()
+            }
+            if (!ready) break;
+        }
+        if (!fgets(line, sizeof(line), in)) break;
         // A line beyond the buffer would otherwise be parsed as two commands,
         // desyncing 1-in/1-out reply pairing. Drain it and reply with one error.
         if (!strchr(line, '\n') && !feof(in)) {
@@ -1012,5 +1040,6 @@ int esprite_daemon(FILE* in, FILE* out) {
         }
         fflush(out);
     }
+daemon_interrupted:
     return 0;
 }
