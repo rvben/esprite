@@ -59,7 +59,10 @@ esprite serve --target waveshare_amoled_216_c6 --port 8080 --window
 
 This opens a native SDL2 window that presents the device framebuffer live and
 lets you drive it: **mouse** = touch (click and drag), **space** = PRIMARY
-button, **tab** = SECONDARY, **p** = PWR, **Esc** = quit. Point a live bridge at
+button, **tab** = SECONDARY, **p** = PWR, **Esc** = quit. PWR follows the
+hardware's hold semantics: a quick press or click is a short press; holding
+past 1.5 s emits the long-press edge (hold ~3 s then release for Clawdmeter's
+pair gesture). Ctrl-C stops `serve` cleanly. Point a live bridge at
 the same port and the real data updates in the window in real time.
 
 The window is optional: it is only compiled when SDL2 is found at configure time

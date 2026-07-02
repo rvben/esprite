@@ -31,6 +31,10 @@ struct SimWindow {
     int  mouse_held = -1;      // physical button index the mouse is holding, or -1
     bool key_held[MAX_BTN]{};  // per-button keyboard hold state (a button can be held by both)
     int  pwr_flash = 0;
+    // PWR hold state: short click injects on release; holding past the AXP
+    // long-press threshold injects the long edge, then release its edge.
+    uint32_t pwr_down_at = 0;
+    bool     pwr_long_sent = false;
     int  nbtn = 0;
     WinBtn btns[MAX_BTN];
     // Hardware control strip.
@@ -114,20 +118,39 @@ static void set_battery_from_x(SimWindow* win, int mx) {
     sim_input().battery_pct = pct;
 }
 
+// Matches the AXP PMU's long-press threshold: holding PWR this long emits the
+// long edge (2); the eventual release then emits the release edge (3). A
+// shorter hold emits one short-press event (1) on release, like the hardware.
+static const uint32_t PWR_LONG_MS = 1500;
+
+static bool pwr_is_held(SimWindow* win) {
+    for (int i = 0; i < win->nbtn; ++i)
+        if (win->btns[i].def->action == ACT_PWR &&
+            (win->mouse_held == i || win->key_held[i]))
+            return true;
+    return false;
+}
+
 static void press_action(SimWindow* win, const SimButton* b) {
     switch (b->action) {
     case ACT_PRIMARY:   sim_input().button[0] = true; break;
     case ACT_SECONDARY: sim_input().button[1] = true; break;
     case ACT_GPIO:      sim_gpio_set(b->gpio, 1); break;
-    case ACT_PWR:       sim_input().pwr_events.push_back(1); win->pwr_flash = 10; break;
+    case ACT_PWR:
+        win->pwr_down_at = SDL_GetTicks();
+        win->pwr_long_sent = false;
+        win->pwr_flash = 10;
+        break;
     }
 }
-static void release_action(const SimButton* b) {
+static void release_action(SimWindow* win, const SimButton* b) {
     switch (b->action) {
     case ACT_PRIMARY:   sim_input().button[0] = false; break;
     case ACT_SECONDARY: sim_input().button[1] = false; break;
     case ACT_GPIO:      sim_gpio_set(b->gpio, 0); break;
-    case ACT_PWR:       break;
+    case ACT_PWR:
+        sim_input().pwr_events.push_back(win->pwr_long_sent ? 3 : 1);
+        break;
     }
 }
 static bool is_active(SimWindow* win, const SimButton* b) {
@@ -135,7 +158,7 @@ static bool is_active(SimWindow* win, const SimButton* b) {
     case ACT_PRIMARY:   return sim_input().button[0];
     case ACT_SECONDARY: return sim_input().button[1];
     case ACT_GPIO:      return sim_gpio_get(b->gpio) != 0;
-    case ACT_PWR:       return win->pwr_flash > 0;
+    case ACT_PWR:       return win->pwr_flash > 0 || pwr_is_held(win);
     }
     return false;
 }
@@ -267,7 +290,7 @@ bool sim_window_tick(SimWindow* win) {
                     int i = win->mouse_held;
                     win->mouse_held = -1;
                     // Don't clear a button the keyboard is still holding.
-                    if (!win->key_held[i]) release_action(win->btns[i].def);
+                    if (!win->key_held[i]) release_action(win, win->btns[i].def);
                 }
             }
             break;
@@ -296,7 +319,7 @@ bool sim_window_tick(SimWindow* win) {
                     e.key.keysym.sym == (SDL_Keycode)(unsigned char)win->btns[i].def->key) {
                     win->key_held[i] = false;
                     // Don't clear a button the mouse is still holding.
-                    if (win->mouse_held != i) release_action(win->btns[i].def);
+                    if (win->mouse_held != i) release_action(win, win->btns[i].def);
                 }
             break;
         default: break;
@@ -311,6 +334,12 @@ bool sim_window_tick(SimWindow* win) {
     SDL_RenderCopy(r, win->texture, nullptr, &dev);
 
     if (win->pwr_flash > 0) --win->pwr_flash;
+    // A PWR hold crossing the long-press threshold emits the long edge once.
+    if (pwr_is_held(win) && !win->pwr_long_sent &&
+        SDL_GetTicks() - win->pwr_down_at >= PWR_LONG_MS) {
+        sim_input().pwr_events.push_back(2);
+        win->pwr_long_sent = true;
+    }
     for (int i = 0; i < win->nbtn; ++i)
         draw_labeled(r, win->btns[i].r, win->btns[i].def->label, is_active(win, win->btns[i].def), 3);
 

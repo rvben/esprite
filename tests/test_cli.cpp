@@ -1,6 +1,8 @@
 #include "cli_test_helpers.h"
 #include "Arduino.h"
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <csignal>
 
 static bool file_exists(const char* p) { struct stat st; return stat(p, &st) == 0; }
 
@@ -63,6 +65,27 @@ TEST_CASE("pwr long-press and release are injectable like a short press") {
     // previously the long/release forms did not exist at all (bad_args).
     CHECK(run_cli({"esprite", "button", "pwr-long", "--target", "sample_gfx"}) == 7);
     CHECK(run_cli({"esprite", "button", "pwr-release", "--target", "sample_gfx"}) == 7);
+}
+
+TEST_CASE("serve shuts down cleanly on SIGTERM") {
+    // Regression: serve's loop had no signal handling, so Ctrl-C/SIGTERM
+    // killed the process (signal death) instead of an orderly exit 0.
+    if (access("./esprite", X_OK) != 0) return;   // run from the build dir (ctest)
+    pid_t pid = fork();
+    REQUIRE(pid >= 0);
+    if (pid == 0) {
+        setenv("ESPRITE_HTTP_PORT", "0", 1);
+        freopen("/dev/null", "w", stdout);
+        freopen("/dev/null", "w", stderr);
+        execl("./esprite", "esprite", "serve", "--target", "cyd", (char*)nullptr);
+        _exit(127);
+    }
+    usleep(400000);   // let it boot and enter the pump loop
+    kill(pid, SIGTERM);
+    int status = 0;
+    for (int i = 0; i < 40 && waitpid(pid, &status, WNOHANG) == 0; ++i) usleep(100000);
+    CHECK(WIFEXITED(status));
+    CHECK(WEXITSTATUS(status) == 0);
 }
 
 TEST_CASE("gpio injection is readable through the Arduino API after the command") {

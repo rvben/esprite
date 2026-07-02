@@ -23,6 +23,7 @@
 #include <thread>
 #include <chrono>
 #include <cctype>
+#include <csignal>
 #include <unistd.h>
 
 static const int WARMUP_STEPS = 60;
@@ -385,8 +386,15 @@ int esprite_main(int argc, char** argv) {
                 shot ? "" : " (pass --shot to capture frames)");
         if (shot) sim_screenshot_png(shot);
 
+        // Ctrl-C / SIGTERM exit the loop for an orderly shutdown (window
+        // closed, exit code 0) instead of dying mid-frame.
+        static volatile sig_atomic_t stop;
+        stop = 0;
+        signal(SIGINT,  [](int) { stop = 1; });
+        signal(SIGTERM, [](int) { stop = 1; });
+
         auto last = std::chrono::steady_clock::now();
-        for (;;) {
+        while (!stop) {
             sim_run_steps(4);              // pump handleClient() so POSTs land
             bool paced = false;
 #ifdef HAVE_SDL2
