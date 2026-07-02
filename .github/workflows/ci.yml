@@ -1,4 +1,4 @@
-# Every step is a make target, runnable locally as-is. The Clawdmeter firmware
+# Every step is a make target, runnable locally as-is. The agentgauge firmware
 # is a private sibling checkout, so CI exercises the public build: the generic
 # targets (sample_gfx, cyd, cyd_tft), the shims, and both test suites.
 name: ci

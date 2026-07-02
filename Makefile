@@ -1,13 +1,14 @@
 BUILD   ?= build
 RELEASE ?= build-release
 PREFIX  ?= /usr/local
-TARGET  ?= waveshare_amoled_216_c6
+TARGET  ?= agentgauge
 
-# Optional path to the Clawdmeter firmware source; the CMake default is the
-# ../waveshare sibling checkout. CI points this at a fresh upstream clone.
+# Optional path to the agentgauge firmware source; the CMake default is the
+# ../agentgauge sibling checkout's firmware/src. agentgauge's own Makefile
+# points this at its checkout when building esprite as a test harness.
 CMAKE_ARGS := -DCMAKE_BUILD_TYPE=Debug
-ifdef CLAWDMETER_SRC
-CMAKE_ARGS += -DCLAWDMETER_SRC=$(CLAWDMETER_SRC)
+ifdef AGENTGAUGE_SRC
+CMAKE_ARGS += -DAGENTGAUGE_SRC=$(AGENTGAUGE_SRC)
 endif
 
 .PHONY: configure build test screenshot scenario goldens release install dist clean

@@ -1,7 +1,7 @@
 // A CYD (Cheap Yellow Display, ESP32-2432S028R: 320x240 ILI9341 + XPT2046
 // resistive touch) touch-paint demo. It uses only the framework's Arduino_GFX
 // display shim and the sim touch bus - no CYD-specific sim code - which shows
-// esprite hosting a very different board than the Waveshare/Clawdmeter targets.
+// esprite hosting a very different board than the LVGL AMOLED targets.
 //
 // Tap a colour swatch in the top bar to pick a brush, then tap the canvas to
 // paint. The classic CYD hello-world, driven entirely by injected taps.

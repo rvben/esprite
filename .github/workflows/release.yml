@@ -3,10 +3,9 @@
 # tag. Every build step is a make target, runnable locally as-is.
 #
 # The binaries carry the generic targets (sample_gfx, cyd, cyd_tft); the
-# Clawdmeter-backed Waveshare targets need a source build against a firmware
-# checkout (README, CLAWDMETER_SRC). Bundling them here would freeze an
-# upstream firmware snapshot into the release, and upstream currently lags
-# the firmware these targets are built for; revisit when upstream syncs.
+# agentgauge target needs a source build against a firmware checkout (README,
+# AGENTGAUGE_SRC). Bundling it here would freeze a firmware snapshot into the
+# release, so it stays a source-build-only target for now.
 name: release
 
 on:

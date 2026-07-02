@@ -16,9 +16,9 @@ function(esprite_warnings target)
     target_compile_options(${target} PRIVATE -Wall -Wextra)
 endfunction()
 
-# Read-only path to the Clawdmeter firmware source (first onboarded target).
-set(CLAWDMETER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../waveshare/Clawdmeter/firmware/src"
-    CACHE PATH "Clawdmeter firmware src tree")
+# Read-only path to the agentgauge firmware source (first onboarded target).
+set(AGENTGAUGE_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../agentgauge/firmware/src"
+    CACHE PATH "agentgauge firmware src tree")
 
 include(FetchContent)
 
@@ -70,8 +70,8 @@ target_include_directories(core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core)
 target_link_libraries(core PUBLIC shims)
 esprite_warnings(core)
 
-# LVGL built from source with the sim lv_conf.h. Pinned to 9.5.0 to match the
-# version the Clawdmeter fonts were patched for (lv_font_t has static_bitmap).
+# LVGL built from source with the sim lv_conf.h. Pinned to 9.5.0 for a stable
+# core API surface (lv_font_t has static_bitmap).
 set(LV_BUILD_CONF_PATH ${CMAKE_CURRENT_SOURCE_DIR}/peripherals/lvgl/lv_conf.h
     CACHE STRING "" FORCE)
 # The sim uses only core LVGL: no demos, examples, or ThorVG vector graphics
@@ -104,7 +104,7 @@ target_include_directories(lvgl_glue PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/peripher
 target_link_libraries(lvgl_glue PUBLIC lvgl peripherals)
 esprite_warnings(lvgl_glue)
 
-# ArduinoJson (used by the CLI scenario runner and by the clawdmeter target).
+# ArduinoJson (used by the CLI scenario runner and by the agentgauge target).
 FetchContent_Declare(ArduinoJson
     GIT_REPOSITORY https://github.com/bblanchon/ArduinoJson.git
     GIT_TAG v7.2.0
@@ -145,10 +145,10 @@ function(add_sim_target name)
 endfunction()
 
 # A board variant reuses an already-built firmware library and only adds its own
-# board.cpp (board profile + registration). Multiple variants share one compiled
-# firmware, so boards of the same firmware (e.g. the 480x480 C6 and the 368x448
-# 1.8) coexist in the single multi-target binary. The board profile is selected
-# at runtime by board_caps() from the active target's BoardDesc.
+# board.cpp (board profile + registration). Multiple variants of the same
+# firmware can coexist in the single multi-target binary this way, each
+# selecting its own panel/buttons at runtime via board_caps() from the active
+# target's BoardDesc (agentgauge has just the one board today).
 function(add_board_variant name fw)
     # Called from targets/<board>/CMakeLists.txt, so board.cpp resolves against
     # that board's source dir.
@@ -173,7 +173,7 @@ endfunction()
 
 # Shared firmwares, compiled once (a firmware is board-agnostic; board targets
 # below select the panel). Added before the board targets that reference them.
-foreach(_fw clawdmeter)
+foreach(_fw agentgauge)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/firmwares/${_fw}/CMakeLists.txt)
         add_subdirectory(firmwares/${_fw})
     endif()
@@ -181,7 +181,7 @@ endforeach()
 
 # Onboarded targets: board variants (which run a shared firmware) and standalone
 # apps. Each provides its own CMakeLists via add_subdirectory.
-foreach(_t waveshare_amoled_216_c6 waveshare_amoled_216_c6_buddy waveshare_amoled_216 waveshare_amoled_18 sample_gfx cyd cyd_tft)
+foreach(_t agentgauge sample_gfx cyd cyd_tft)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/targets/${_t}/CMakeLists.txt)
         add_subdirectory(targets/${_t})
     endif()
@@ -231,29 +231,16 @@ add_executable(sim_itests
     tests/itest_main.cpp
     tests/itest_sample_gfx.cpp
 )
-# The Clawdmeter firmware is only built when its source is present (see
-# firmwares/clawdmeter/CMakeLists.txt). Only then compile the integration test
-# that boots it, so a clean checkout without the firmware still passes `make test`.
-if(TARGET clawdmeter_fw)
-    target_sources(sim_itests PRIVATE tests/itest_clawdmeter.cpp)
-endif()
 target_link_libraries(sim_itests PRIVATE cli_lib)
 link_sim_targets(sim_itests)
 
-# The Waveshare AMOLED 1.8 runs the same LVGL firmware as the 2.16 C6, and
-# lv_init runs once per process, so it needs its own executable to keep LVGL
-# global state clean. This also regression-tests runtime board selection.
-if(TARGET clawdmeter_fw)
-    add_executable(sim_itests_amoled18 tests/itest_main.cpp tests/itest_amoled18.cpp)
-    target_link_libraries(sim_itests_amoled18 PRIVATE cli_lib)
-    link_sim_targets(sim_itests_amoled18)
-
-    add_executable(sim_itests_amoled216 tests/itest_main.cpp tests/itest_amoled216.cpp)
-    target_link_libraries(sim_itests_amoled216 PRIVATE cli_lib)
-    link_sim_targets(sim_itests_amoled216)
-
-    # The run-session daemon driving an LVGL target end to end: same one-boot-
-    # per-process constraint, so it gets its own executable too.
+# The agentgauge firmware is only built when its source is present (see
+# firmwares/agentgauge/CMakeLists.txt). Only then compile the integration tests
+# that boot it, so a clean checkout without the firmware still passes `make test`.
+if(TARGET agentgauge_fw)
+    # The run-session daemon driving an LVGL target end to end: lv_init runs
+    # once per process, so it gets its own executable to keep LVGL global
+    # state clean.
     add_executable(sim_itests_daemon tests/itest_main.cpp tests/itest_daemon.cpp)
     target_link_libraries(sim_itests_daemon PRIVATE cli_lib)
     link_sim_targets(sim_itests_daemon)
@@ -274,33 +261,12 @@ if(TARGET clawdmeter_fw)
     link_sim_targets(sim_itests_ui)
 endif()
 
-# The BLE Hardware Buddy flavor end to end (pairing, heartbeats, prompts, HID,
-# the hold-to-pair gesture). Own executable: one LVGL boot per process.
-if(TARGET clawdmeter_buddy)
-    add_executable(sim_itests_buddy tests/itest_main.cpp tests/itest_buddy.cpp)
-    target_link_libraries(sim_itests_buddy PRIVATE cli_lib)
-    link_sim_targets(sim_itests_buddy)
-
-    # The one-shot ble send round trip (auto-connect, deliver, return replies).
-    add_executable(sim_itests_ble_oneshot tests/itest_main.cpp tests/itest_ble_oneshot.cpp)
-    target_link_libraries(sim_itests_ble_oneshot PRIVATE cli_lib)
-    link_sim_targets(sim_itests_ble_oneshot)
-endif()
-
 enable_testing()
 add_test(NAME sim_tests COMMAND sim_tests)
 add_test(NAME sim_itests COMMAND sim_itests)
-if(TARGET sim_itests_amoled18)
-    add_test(NAME sim_itests_amoled18 COMMAND sim_itests_amoled18)
-    add_test(NAME sim_itests_amoled216 COMMAND sim_itests_amoled216)
-endif()
 if(TARGET sim_itests_daemon)
     add_test(NAME sim_itests_daemon COMMAND sim_itests_daemon)
     add_test(NAME sim_itests_scenario COMMAND sim_itests_scenario)
     add_test(NAME sim_itests_scenario_expect COMMAND sim_itests_scenario_expect)
     add_test(NAME sim_itests_ui COMMAND sim_itests_ui)
-endif()
-if(TARGET sim_itests_buddy)
-    add_test(NAME sim_itests_buddy COMMAND sim_itests_buddy)
-    add_test(NAME sim_itests_ble_oneshot COMMAND sim_itests_ble_oneshot)
 endif()

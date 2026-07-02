@@ -174,7 +174,7 @@ void WebServer::handleClient() {
         // ordering mirrors real Arduino WebServer, which streams the body into
         // the upload handler before invoking the main handler; there is no
         // route-level auth gate on hardware, so an upload handler must
-        // authorize itself (Clawdmeter's checks X-Clawdmeter at
+        // authorize itself (agentgauge's checks X-Agentgauge at
         // UPLOAD_FILE_START and rejects before touching Update). Keeping the
         // shim faithful here means a firmware that forgets that guard fails in
         // the sim exactly as it would on the device.

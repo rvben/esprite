@@ -61,7 +61,7 @@ static const std::string kSchema = std::string(R"JSON({
         { "name": "rotation", "description": "Board supports rotation.", "type": "boolean" }
       ] },
     { "name": "ui", "description": "Snapshot the active LVGL widget tree as an array of elements; act on the refs with 'tap --ref'. Empty for non-LVGL targets.", "mutating": false, "stability": "stable",
-      "example": { "args": ["--target", "waveshare_amoled_216_c6"], "stdin": "" },
+      "example": { "args": ["--target", "agentgauge"], "stdin": "" },
       "output_fields": [
         { "name": "ref", "description": "Stable element handle, e.g. e3.", "type": "string" },
         { "name": "type", "description": "label|bar|arc|button|image|line|obj.", "type": "string" },
@@ -72,7 +72,7 @@ static const std::string kSchema = std::string(R"JSON({
       ] },
     { "name": "screenshot", "description": "Boot, render, and write a PNG of the device screen.", "mutating": false, "stability": "stable",
       "args": [ { "name": "out", "description": "Output PNG path (default esprite.png).", "type": "string", "required": false } ],
-      "example": { "args": ["out.png", "--target", "waveshare_amoled_216_c6"], "stdin": "" },
+      "example": { "args": ["out.png", "--target", "agentgauge"], "stdin": "" },
       "output_fields": [
         { "name": "ok", "description": "Wrote the file.", "type": "boolean" },
         { "name": "path", "description": "PNG path.", "type": "string" },
@@ -81,13 +81,13 @@ static const std::string kSchema = std::string(R"JSON({
       ] },
     { "name": "snapshot", "description": "POST a JSON body to the device's /snapshot HTTP endpoint (data the firmware parses).", "mutating": true, "stability": "stable",
       "args": [ { "name": "json", "description": "Wire JSON to POST.", "type": "string", "required": true } ],
-      "example": { "args": ["{\"lim\":1,\"s5\":42}", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
+      "example": { "args": ["{\"lim\":1,\"s5\":42}", "--target", "agentgauge"], "stdin": "" } },
     { "name": "tap", "description": "Inject a touch, by widget ref (--ref e3, from ui) or by pixel (x y).", "mutating": true, "stability": "stable",
       "args": [
         { "name": "x", "description": "X pixel (omit when using --ref).", "type": "number", "required": false },
         { "name": "y", "description": "Y pixel.", "type": "number", "required": false }
       ],
-      "example": { "args": ["240", "240", "--target", "waveshare_amoled_216_c6"], "stdin": "" },
+      "example": { "args": ["240", "240", "--target", "agentgauge"], "stdin": "" },
       "output_fields": [
         { "name": "ok", "description": "Tap injected.", "type": "boolean" },
         { "name": "x", "description": "Resolved x.", "type": "number" },
@@ -100,43 +100,43 @@ static const std::string kSchema = std::string(R"JSON({
         { "name": "x2", "description": "End X pixel.", "type": "number", "required": true },
         { "name": "y2", "description": "End Y pixel.", "type": "number", "required": true }
       ],
-      "example": { "args": ["400", "240", "100", "240", "--target", "waveshare_amoled_216_c6"], "stdin": "" },
+      "example": { "args": ["400", "240", "100", "240", "--target", "agentgauge"], "stdin": "" },
       "output_fields": [
         { "name": "ok", "description": "Swipe injected.", "type": "boolean" }
       ] },
     { "name": "battery", "description": "Set battery level; --charging and --no-vbus set the flags.", "mutating": true, "stability": "stable",
       "args": [ { "name": "pct", "description": "0-100.", "type": "number", "required": true } ],
-      "example": { "args": ["50", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
+      "example": { "args": ["50", "--target", "agentgauge"], "stdin": "" } },
     { "name": "rotate", "description": "Set the IMU rotation quadrant (0-3).", "mutating": true, "stability": "stable",
       "args": [ { "name": "quadrant", "description": "0-3.", "type": "number", "required": true } ],
-      "example": { "args": ["1", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
+      "example": { "args": ["1", "--target", "agentgauge"], "stdin": "" } },
     { "name": "gpio", "description": "Set a GPIO pin level (read back by digitalRead).", "mutating": true, "stability": "stable",
       "args": [
         { "name": "pin", "description": "GPIO number.", "type": "number", "required": true },
         { "name": "level", "description": "0 or 1.", "type": "number", "required": true }
       ],
-      "example": { "args": ["9", "1", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
-    { "name": "ble", "description": "Drive the virtual BLE link of a BLE firmware (e.g. the Clawdmeter Hardware Buddy), standing in for the desktop app. One-shot `ble send` completes the round trip itself: it connects (bonded), delivers the JSON line, and returns the device's replies (add --shot to capture the resulting frame). connect/pair (passkey pairing via --passkey N), disconnect, recv, and hid hold state across commands only inside a run session or scenario.", "mutating": true, "stability": "stable",
+      "example": { "args": ["9", "1", "--target", "agentgauge"], "stdin": "" } },
+    { "name": "ble", "description": "Drive the virtual BLE link of a BLE firmware, standing in for a central/host app. One-shot `ble send` completes the round trip itself: it connects (bonded), delivers the JSON line, and returns the device's replies (add --shot to capture the resulting frame). connect/pair (passkey pairing via --passkey N), disconnect, recv, and hid hold state across commands only inside a run session or scenario. Requires a target whose firmware binds the virtual BLE link; returns bad_args otherwise.", "mutating": true, "stability": "stable",
       "args": [
         { "name": "sub", "description": "connect|pair|disconnect|send|recv|hid.", "type": "string", "required": true, "enum": ["connect", "pair", "disconnect", "send", "recv", "hid"] },
         { "name": "json", "description": "For send: one JSON line for the device.", "type": "string", "required": false }
       ],
-      "example": { "args": ["send", "{\"cmd\":\"status\"}", "--target", "waveshare_amoled_216_c6_buddy"], "stdin": "" },
+      "example": { "args": ["send", "{\"cmd\":\"status\"}", "--target", "<ble-firmware-target>"], "stdin": "" },
       "output_fields": [
         { "name": "ok", "description": "Delivered.", "type": "boolean" },
         { "name": "replies", "description": "For send: JSON lines the device sent back.", "type": "string" }
       ] },
     { "name": "button", "description": "Press a physical button. pwr-long and pwr-release inject the power button's long-press and release edges for hold gestures (advance time with steps between them).", "mutating": true, "stability": "stable",
       "args": [ { "name": "which", "description": "primary|secondary|pwr|pwr-long|pwr-release.", "type": "string", "required": true, "enum": ["primary", "secondary", "pwr", "pwr-long", "pwr-release"] } ],
-      "example": { "args": ["primary", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
+      "example": { "args": ["primary", "--target", "agentgauge"], "stdin": "" } },
     { "name": "serial", "description": "serial send TEXT feeds device input; serial expect REGEX matches captured output (exit 1 on no match).", "mutating": false, "stability": "stable",
       "args": [
         { "name": "sub", "description": "send or expect.", "type": "string", "required": true, "enum": ["send", "expect"] },
         { "name": "arg", "description": "Text to send, or regex to expect.", "type": "string", "required": true }
       ],
-      "example": { "args": ["expect", "ready", "--target", "waveshare_amoled_216_c6"], "stdin": "" } },
+      "example": { "args": ["expect", "ready", "--target", "agentgauge"], "stdin": "" } },
     { "name": "logs", "description": "Print captured device serial output.", "mutating": false, "stability": "stable",
-      "example": { "args": ["--target", "waveshare_amoled_216_c6"], "stdin": "" },
+      "example": { "args": ["--target", "agentgauge"], "stdin": "" },
       "output_fields": [ { "name": "serial", "description": "Captured serial text.", "type": "string" } ] },
     { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless.", "mutating": true, "stability": "stable",
       "args": [ { "name": "file", "description": "Scenario JSON path.", "type": "string", "required": true } ] },
@@ -356,13 +356,13 @@ int esprite_main(int argc, char** argv) {
         std::string file = positional(argc, argv, 0);
         if (file.empty()) return fail("bad_args", "scenario needs a file path", 2);
         std::string def = resolve_target(argc, argv);
-        return scenario_run(file, def.empty() ? "waveshare_amoled_216_c6" : def);
+        return scenario_run(file, def.empty() ? "agentgauge" : def);
     }
 
     if (cmd == "serve") {
         // Persistent: bind the device webserver on --port, boot, then pump loop()
-        // in real time so a live bridge (clawdmeter serve) can POST snapshots.
-        // Refresh a screenshot every --interval-ms if --shot is given.
+        // in real time so a live bridge can POST snapshots. Refresh a screenshot
+        // every --interval-ms if --shot is given.
         if (const char* p = opt_val(argc, argv, "--port")) setenv("ESPRITE_HTTP_PORT", p, 1);
         std::string t = resolve_target(argc, argv);
         if (t.empty()) return fail("no_target", "no --target and more than one target registered", 2);

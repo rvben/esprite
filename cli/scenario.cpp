@@ -41,10 +41,10 @@ bool sim_wifi_post(const std::string& path, const std::string& body) {
     setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
     bool ok = false;
     if (connect(fd, (sockaddr*)&a, sizeof(a)) == 0) {
-        // The X-Clawdmeter header satisfies the Clawdmeter firmware's CSRF guard
+        // The X-Agentgauge header satisfies the agentgauge firmware's CSRF guard
         // on /snapshot; other targets ignore it.
         std::string req = "POST " + path + " HTTP/1.1\r\nHost: x\r\n"
-            "X-Clawdmeter: 1\r\nContent-Length: "
+            "X-Agentgauge: 1\r\nContent-Length: "
             + std::to_string(body.size()) + "\r\n\r\n" + body;
         // The single-threaded loopback server reads one bounded chunk, so a body
         // beyond that would be received truncated. Reject oversized posts cleanly

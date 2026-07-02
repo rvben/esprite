@@ -4,7 +4,7 @@
 #include <string>
 #include <sys/stat.h>
 
-// End-to-end scenario run against the real clawdmeter firmware, through the
+// End-to-end scenario run against the real agentgauge firmware, through the
 // production entry point (esprite_main scenario). Own executable: the scenario
 // boots an LVGL target, and lv_init runs once per process.
 
@@ -29,7 +29,7 @@ TEST_CASE("a scenario boots, injects data, and captures distinct settled frames"
     const char* scn = "/tmp/esprite_itest_scenario/scn.json";
     FILE* f = fopen(scn, "w");
     REQUIRE(f != nullptr);
-    fputs("{\"target\":\"waveshare_amoled_216_c6\",\"steps\":["
+    fputs("{\"target\":\"agentgauge\",\"steps\":["
           "{\"cmd\":\"screenshot\",\"out\":\"/tmp/esprite_itest_scenario/01.png\"},"
           "{\"cmd\":\"snapshot\",\"data\":{\"lim\":1,\"s5\":42,\"s5r\":180,"
           "\"s7\":10,\"s7r\":6000,\"ctx\":55,\"cost\":1.5,\"model\":\"opus\"}},"

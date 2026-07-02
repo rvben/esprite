@@ -21,7 +21,7 @@ bool board_has_action(SimInputAction act) {
 ActionError apply_button(const std::string& which) {
     // The PWR control has three injectable edges, matching the power HAL:
     // press (1), long-press (2), and release (3). Long-press + release drive
-    // hold gestures (e.g. Clawdmeter's hold-to-pair) with `steps` in between.
+    // a firmware's hold-release gesture with `steps` in between.
     int pwr_event = (which == "pwr")         ? 1
                   : (which == "pwr-long")    ? 2
                   : (which == "pwr-release") ? 3 : 0;
