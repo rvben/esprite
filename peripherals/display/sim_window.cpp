@@ -247,6 +247,32 @@ static bool is_active(SimWindow* win, const SimButton* b) {
     return false;
 }
 
+// Opening an overlay (help or panel) must not leave a keyboard-held button
+// stuck: a closed control can't keep asserting its action, and the physical
+// KEYUP for that key may arrive while the overlay is still open (which the
+// per-button KEYUP handling below only processes for keys it still
+// considers held, so this is the one place that ever clears the held state
+// early). Called at the moment help_open/panel_open transitions to true.
+static void release_all_key_holds(SimWindow* win) {
+    for (int i = 0; i < win->layout.nub_count; ++i) {
+        if (win->key_held[i]) {
+            win->key_held[i] = false;
+            // Don't clear a button the mouse is still holding.
+            if (win->mouse_held != i) release_action(win, &win->board->buttons[i]);
+        }
+    }
+}
+
+// help_open/panel_open are mutually exclusive; these four helpers are the
+// only places either flag changes, so every open clears held keyboard
+// buttons and every panel-close clears bat_dragging (otherwise Esc/backtick/
+// an outside click while mid-drag would leave the slider silently tracking
+// mouse motion the closed panel no longer shows).
+static void open_help(SimWindow* win)  { win->help_open = true;  win->panel_open = false; release_all_key_holds(win); }
+static void close_help(SimWindow* win) { win->help_open = false; }
+static void open_panel(SimWindow* win)  { win->panel_open = true;  win->help_open = false; release_all_key_holds(win); }
+static void close_panel(SimWindow* win) { win->panel_open = false; win->bat_dragging = false; }
+
 SimWindow* sim_window_open(const char* title, const BoardDesc* board, int scale) {
     if (!board) return nullptr;
     if (scale < 1) scale = 1;
@@ -308,12 +334,11 @@ bool sim_window_tick(SimWindow* win) {
                 if (win_rect_contains(win->layout.more_nub, mx, my)) {
                     // The "..." nub always toggles the panel, whichever
                     // overlay (if any) is currently open.
-                    win->panel_open = !win->panel_open;
-                    win->help_open = false;
+                    if (win->panel_open) close_panel(win); else open_panel(win);
                 } else if (win->help_open) {
                     // Any click dismisses the help overlay instead of also
                     // acting as touch/nub input on the dimmed device below.
-                    win->help_open = false;
+                    close_help(win);
                 } else if (win->panel_open) {
                     WinRect card = layout_panel_card(win->layout);
                     if (win_rect_contains(card, mx, my)) {
@@ -329,7 +354,7 @@ bool sim_window_tick(SimWindow* win) {
                             sim_input().quadrant = (sim_input().quadrant + 1) % 4;
                         }
                     } else {
-                        win->panel_open = false;   // click outside the panel closes it
+                        close_panel(win);   // click outside the panel closes it
                     }
                 } else if (win_rect_contains(win->layout.screen, mx, my)) {
                     win->touching = true;
@@ -371,23 +396,25 @@ bool sim_window_tick(SimWindow* win) {
             break;
         case SDL_KEYDOWN:
             if (e.key.keysym.sym == SDLK_ESCAPE) {
-                if (win->help_open)  { win->help_open = false; break; }
-                if (win->panel_open) { win->panel_open = false; break; }
+                if (win->help_open)  { close_help(win); break; }
+                if (win->panel_open) { close_panel(win); break; }
                 return false;
             }
             if (!e.key.repeat && e.key.keysym.sym == SDLK_BACKQUOTE) {
-                win->panel_open = !win->panel_open;
-                win->help_open = false;
+                if (win->panel_open) close_panel(win); else open_panel(win);
                 break;
             }
             // '?' is shift+/ on a US layout; SDL reports the unshifted
             // keycode, so bind the physical / key as well as 'h'.
             if (!e.key.repeat && (e.key.keysym.sym == SDLK_SLASH || e.key.keysym.sym == SDLK_h)) {
-                win->help_open = !win->help_open;
-                win->panel_open = false;
+                if (win->help_open) close_help(win); else open_help(win);
                 break;
             }
-            if (!e.key.repeat)
+            // A closed overlay's device is not interactive: per-button keys
+            // only press while neither overlay is open (mouse clicks on nubs
+            // are already gated the same way, above). Esc/backtick/?/h stay
+            // live regardless, handled above before this gate.
+            if (!e.key.repeat && !win->help_open && !win->panel_open)
                 for (int i = 0; i < win->layout.nub_count; ++i)
                     if (win->board->buttons[i].key &&
                         e.key.keysym.sym == (SDL_Keycode)(unsigned char)win->board->buttons[i].key) {
@@ -399,9 +426,16 @@ bool sim_window_tick(SimWindow* win) {
             for (int i = 0; i < win->layout.nub_count; ++i)
                 if (win->board->buttons[i].key &&
                     e.key.keysym.sym == (SDL_Keycode)(unsigned char)win->board->buttons[i].key) {
-                    win->key_held[i] = false;
-                    // Don't clear a button the mouse is still holding.
-                    if (win->mouse_held != i) release_action(win, &win->board->buttons[i]);
+                    // Only release a button this loop still considers held:
+                    // release_all_key_holds() may already have released it
+                    // early (overlay opened mid-hold), and firing a second
+                    // release here would double-inject its action (e.g. a
+                    // spurious extra ACT_PWR release edge).
+                    if (win->key_held[i]) {
+                        win->key_held[i] = false;
+                        // Don't clear a button the mouse is still holding.
+                        if (win->mouse_held != i) release_action(win, &win->board->buttons[i]);
+                    }
                 }
             break;
         default: break;
@@ -580,12 +614,13 @@ bool sim_window_tick(SimWindow* win) {
     }
 
     if (!win->capture_path.empty()) {
-        int ow = 0, oh = 0;
-        SDL_GetRendererOutputSize(r, &ow, &oh);
-        std::vector<uint8_t> rgb((size_t)ow * oh * 3);
-        if (ow > 0 && oh > 0 &&
-            SDL_RenderReadPixels(r, nullptr, SDL_PIXELFORMAT_RGB24, rgb.data(), ow * 3) == 0)
-            stbi_write_png(win->capture_path.c_str(), ow, oh, 3, rgb.data(), ow * 3);
+        // draw_w/draw_h were already queried above for dpr - the renderer's
+        // output size can't have changed since, so reuse them instead of a
+        // second identical SDL_GetRendererOutputSize call.
+        std::vector<uint8_t> rgb((size_t)draw_w * draw_h * 3);
+        if (draw_w > 0 && draw_h > 0 &&
+            SDL_RenderReadPixels(r, nullptr, SDL_PIXELFORMAT_RGB24, rgb.data(), draw_w * 3) == 0)
+            stbi_write_png(win->capture_path.c_str(), draw_w, draw_h, 3, rgb.data(), draw_w * 3);
         win->capture_path.clear();
     }
 
