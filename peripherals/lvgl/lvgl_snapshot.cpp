@@ -50,16 +50,18 @@ static void json_escape(std::string& out, const char* s) {
     }
 }
 
-// The active LVGL screen for the current target, or null. Guards against a stale
-// tree left in LVGL's global state by a previously-booted target: if the active
-// display's resolution no longer matches the current framebuffer, this target
-// does not own the LVGL screen (e.g. a non-LVGL target booted after an LVGL one).
+// Whether LVGL's default display predates the current boot. Boot hooks run
+// before the target's setup(), so a display that already exists when a boot
+// starts was created by an earlier owner: LVGL targets are one-boot-per-
+// process, so any later boot (LVGL or not) must not read that screen.
+static bool g_display_preexisted = false;
+
+// The active LVGL screen for the current target, or null when this boot does
+// not own the LVGL display (e.g. a non-LVGL target booted after an LVGL one,
+// even at the same resolution).
 static lv_obj_t* current_screen() {
     lv_display_t* disp = lv_display_get_default();
-    if (!disp) return nullptr;
-    if ((int)lv_display_get_horizontal_resolution(disp) != sim_framebuffer().w() ||
-        (int)lv_display_get_vertical_resolution(disp)   != sim_framebuffer().h())
-        return nullptr;
+    if (!disp || g_display_preexisted) return nullptr;
     return lv_screen_active();
 }
 
@@ -109,7 +111,11 @@ bool lvgl_ref_center(const std::string& ref, int* x, int* y) {
 
 void lvgl_snapshot_reset() { g_refs.clear(); }
 
-// Reset the ref map on every boot via the common runtime hook, so refs never
-// leak across a re-boot regardless of the caller.
+// On every boot: clear the ref map and record display ownership, so refs and
+// stale screens never leak across a re-boot regardless of the caller.
+static void boot_reset() {
+    lvgl_snapshot_reset();
+    g_display_preexisted = lv_display_get_default() != nullptr;
+}
 extern void sim_on_boot(void (*)());   // core/runtime
-namespace { struct BootReg { BootReg() { sim_on_boot(lvgl_snapshot_reset); } } g_boot_reg; }
+namespace { struct BootReg { BootReg() { sim_on_boot(boot_reset); } } g_boot_reg; }
