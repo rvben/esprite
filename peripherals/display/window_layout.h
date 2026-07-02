@@ -63,7 +63,15 @@ struct WindowLayout {
     WinRect window;   // total client size at scale, origin 0,0
     WinRect screen;   // framebuffer dest rect
     WinRect bezel;    // outer bezel rect (== window)
-    WinRect more_nub; // the "..." extended-panel opener, bottom-right bezel
+    // The "..." extended-panel opener, bottom-right bezel. The panel only
+    // ever holds battery/charge/USB/rotate controls, so a board with neither
+    // (has_battery == has_rotation == false) would open an empty card - more_nub
+    // comes back as a zero rect ({0,0,0,0}) in that case, mirroring how
+    // layout_panel represents a control the board lacks. win_rect_contains
+    // never matches a zero-size rect, so hit-testing it is already a no-op;
+    // sim_window.cpp still gates drawing explicitly rather than relying on
+    // that incidentally.
+    WinRect more_nub;
     NubLayout nubs[MAX_LAYOUT_BUTTONS];
     int      nub_count;
 };
@@ -78,8 +86,9 @@ struct WindowLayout {
 // autos never overlap each other. Only the first MAX_LAYOUT_BUTTONS buttons
 // are laid out (mirrors sim_window.cpp's MAX_BTN truncation). An edge with no
 // buttons on it carries no NUB_PROTRUDE padding, so a board with zero buttons
-// anywhere gets BEZEL_MARGIN on all four sides and no more_nub padding either
-// (more_nub always fits inside the plain bezel).
+// anywhere gets BEZEL_MARGIN on all four sides. more_nub is sized and
+// positioned only when board->has_battery || board->has_rotation; otherwise
+// it comes back zero (see the WindowLayout::more_nub comment above).
 WindowLayout window_layout(const BoardDesc* board, int scale);
 
 // Overlay geometry, in the same window-absolute coordinates as WindowLayout:

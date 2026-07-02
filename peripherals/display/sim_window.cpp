@@ -247,13 +247,14 @@ static bool is_active(SimWindow* win, const SimButton* b) {
     return false;
 }
 
-// Opening an overlay (help or panel) must not leave a button held via either
-// input method stuck: a closed control can't keep asserting its action, and
-// the matching physical release (KEYUP, or MOUSEBUTTONUP) may arrive while
-// the overlay is still open - the per-button KEYUP loop and the
-// MOUSEBUTTONUP handler each only fire release_action for a hold they still
-// consider live, so this is the one place that ever clears held state early.
-// Called at the moment help_open/panel_open transitions to true.
+// Opening an overlay (help or panel) must not leave anything a closed
+// control could still assert: a button held via either input method, an
+// active touch, or a battery-bar drag. The matching physical release
+// (KEYUP, MOUSEBUTTONUP) or motion event may arrive while the overlay is
+// still open - the per-button KEYUP loop, the MOUSEBUTTONUP handler, and the
+// MOUSEMOTION handler each only act on state they still consider live, so
+// this is the one place that ever clears held/touch/drag state early. Called
+// at the moment help_open/panel_open transitions to true.
 static void release_all_holds(SimWindow* win) {
     for (int i = 0; i < win->layout.nub_count; ++i) {
         if (win->key_held[i]) {
@@ -268,17 +269,21 @@ static void release_all_holds(SimWindow* win) {
         // Don't clear a button the keyboard is still holding.
         if (!win->key_held[i]) release_action(win, &win->board->buttons[i]);
     }
+    if (win->touching) { win->touching = false; sim_input().touch_pressed = false; }
+    win->bat_dragging = false;
 }
 
 // help_open/panel_open are mutually exclusive; these four helpers are the
-// only places either flag changes, so every open clears held mouse/keyboard
-// buttons and every panel-close clears bat_dragging (otherwise Esc/backtick/
-// an outside click while mid-drag would leave the slider silently tracking
-// mouse motion the closed panel no longer shows).
-static void open_help(SimWindow* win)  { win->help_open = true;  win->panel_open = false; release_all_holds(win); }
-static void close_help(SimWindow* win) { win->help_open = false; }
-static void open_panel(SimWindow* win)  { win->panel_open = true;  win->help_open = false; release_all_holds(win); }
+// only places either flag ever changes (open_help/open_panel route the other
+// overlay's closure through close_help/close_panel below rather than writing
+// its flag directly), so every open clears held mouse/keyboard buttons, live
+// touch, and any battery drag, and every panel-close clears bat_dragging
+// (otherwise Esc/backtick/an outside click while mid-drag would leave the
+// slider silently tracking mouse motion the closed panel no longer shows).
+static void close_help(SimWindow* win)  { win->help_open = false; }
 static void close_panel(SimWindow* win) { win->panel_open = false; win->bat_dragging = false; }
+static void open_help(SimWindow* win)  { win->help_open = true;  close_panel(win); release_all_holds(win); }
+static void open_panel(SimWindow* win) { win->panel_open = true; close_help(win);  release_all_holds(win); }
 
 SimWindow* sim_window_open(const char* title, const BoardDesc* board, int scale) {
     if (!board) return nullptr;
@@ -324,7 +329,9 @@ SimWindow* sim_window_open(const char* title, const BoardDesc* board, int scale)
     fprintf(stderr, "sim_window: %s", win->layout.nub_count ? "buttons (hover for tooltips)" : "no buttons");
     if (win->has_battery)  fprintf(stderr, ", battery/charge/USB");
     if (win->has_rotation) fprintf(stderr, ", rotate");
-    fprintf(stderr, "  (mouse on screen = touch, ? or h = help, ` = hardware controls, Esc quits)\n");
+    fprintf(stderr, "  (mouse on screen = touch, ? or h = help");
+    if (win->has_battery || win->has_rotation) fprintf(stderr, ", ` = hardware controls");
+    fprintf(stderr, ", Esc quits)\n");
     return win;
 }
 
@@ -338,7 +345,11 @@ bool sim_window_tick(SimWindow* win) {
         case SDL_MOUSEBUTTONDOWN:
             if (e.button.button == SDL_BUTTON_LEFT) {
                 int mx = e.button.x, my = e.button.y;
-                if (win_rect_contains(win->layout.more_nub, mx, my)) {
+                // A board with neither battery nor rotation has nothing for
+                // the panel to show - more_nub is a zero rect there (never
+                // hit), but gate explicitly rather than lean on that.
+                bool has_panel = win->has_battery || win->has_rotation;
+                if (has_panel && win_rect_contains(win->layout.more_nub, mx, my)) {
                     // The "..." nub always toggles the panel, whichever
                     // overlay (if any) is currently open.
                     if (win->panel_open) close_panel(win); else open_panel(win);
@@ -408,7 +419,11 @@ bool sim_window_tick(SimWindow* win) {
                 return false;
             }
             if (!e.key.repeat && e.key.keysym.sym == SDLK_BACKQUOTE) {
-                if (win->panel_open) close_panel(win); else open_panel(win);
+                // No-op on a board with neither battery nor rotation: the
+                // panel would open with nothing to show.
+                if (win->has_battery || win->has_rotation) {
+                    if (win->panel_open) close_panel(win); else open_panel(win);
+                }
                 break;
             }
             // '?' is shift+/ on a US layout; SDL reports the unshifted
@@ -468,7 +483,8 @@ bool sim_window_tick(SimWindow* win) {
     int hover_nub = -1;
     for (int i = 0; i < l.nub_count; ++i)
         if (win_rect_contains(l.nubs[i].hit, win->mouse_x, win->mouse_y)) { hover_nub = i; break; }
-    bool hover_more = win_rect_contains(l.more_nub, win->mouse_x, win->mouse_y);
+    bool has_panel = win->has_battery || win->has_rotation;
+    bool hover_more = has_panel && win_rect_contains(l.more_nub, win->mouse_x, win->mouse_y);
 
     // Draw order: bezel + outline + corners, screen gutter, framebuffer,
     // nubs, the "..." nub, the hovered nub's tooltip, then any open overlay.
@@ -497,11 +513,14 @@ bool sim_window_tick(SimWindow* win) {
         draw_outline(r, body_px, scale_len(1, dpr), kNubOutline);
     }
 
-    SDL_Rect more_px = to_px(l.more_nub, dpr);
-    SDL_Color more_fill = win->panel_open ? kNubActive : (hover_more ? kNubHover : kNubIdle);
-    draw_rounded_rect(r, more_px, scale_len(3, dpr), more_fill, kBezelFill);
-    draw_outline(r, more_px, scale_len(1, dpr), kNubOutline);
-    {
+    // Skip drawing the "..." nub entirely on a board with no panel to open -
+    // otherwise the dots below would still paint at a degenerate (zero-size)
+    // more_px even though the nub body itself draws nothing visible.
+    if (has_panel) {
+        SDL_Rect more_px = to_px(l.more_nub, dpr);
+        SDL_Color more_fill = win->panel_open ? kNubActive : (hover_more ? kNubHover : kNubIdle);
+        draw_rounded_rect(r, more_px, scale_len(3, dpr), more_fill, kBezelFill);
+        draw_outline(r, more_px, scale_len(1, dpr), kNubOutline);
         SDL_SetRenderDrawColor(r, kTooltipText.r, kTooltipText.g, kTooltipText.b, kTooltipText.a);
         int dotr = std::max(1, scale_len(1, dpr));
         int cy = more_px.y + more_px.h / 2;
@@ -552,7 +571,9 @@ bool sim_window_tick(SimWindow* win) {
             if (b.action == ACT_PWR) has_pwr = true;
         }
         if (has_pwr) lines.push_back("PWR: HOLD 1.5S FOR LONG PRESS");
-        lines.push_back("` HARDWARE CONTROLS");
+        // Only list the backtick shortcut where it does something - a board
+        // with neither battery nor rotation has no panel for it to open.
+        if (has_panel) lines.push_back("` HARDWARE CONTROLS");
         lines.push_back("? HELP");
         lines.push_back("ESC QUIT");
 

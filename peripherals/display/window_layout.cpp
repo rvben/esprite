@@ -53,9 +53,12 @@ WindowLayout window_layout(const BoardDesc* board, int scale) {
 
     // Flush to the bottom-right window corner; the bottom bezel band is
     // always >= BEZEL_MARGIN (26) tall, well clear of NUB_THICK (12), so this
-    // never overlaps the screen regardless of which edges have buttons.
-    l.more_nub = WinRect{l.window.w - NUB_LONG, l.window.h - NUB_THICK,
-                          NUB_LONG, NUB_THICK};
+    // never overlaps the screen regardless of which edges have buttons. Only
+    // placed when the panel it opens would actually hold a control - a board
+    // with neither battery nor rotation has nothing for "..." to show.
+    if (board->has_battery || board->has_rotation)
+        l.more_nub = WinRect{l.window.w - NUB_LONG, l.window.h - NUB_THICK,
+                              NUB_LONG, NUB_THICK};
 
     // How many auto-stack (pos < 0) buttons share each edge, so each one
     // knows its slice of the middle 60%.

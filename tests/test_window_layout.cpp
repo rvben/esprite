@@ -242,15 +242,26 @@ TEST_CASE("pos values above 1.0 clamp to the far end of the edge") {
     CHECK(l.nubs[0].body.y == l.screen.y + l.screen.h - NUB_LONG);
 }
 
-TEST_CASE("more_nub sits in the bottom-right bezel corner, outside the screen") {
+TEST_CASE("more_nub sits in the bottom-right bezel corner, outside the screen, "
+          "when the board has battery or rotation") {
+    // kThreeRightBoard has battery (see its BoardDesc above), so the panel it
+    // opens actually holds something.
     WindowLayout l = window_layout(&kThreeRightBoard, 1);
     CHECK(l.more_nub.x == l.window.w - NUB_LONG);
     CHECK(l.more_nub.y == l.window.h - NUB_THICK);
     CHECK(l.more_nub.w == NUB_LONG);
     CHECK(l.more_nub.h == NUB_THICK);
     CHECK_FALSE(rects_overlap(l.more_nub, l.screen));
+}
 
+TEST_CASE("more_nub is absent (zero rect) on a board with neither battery nor rotation") {
+    // kZeroButtonBoard has has_battery == has_rotation == false: the panel
+    // would open with nothing to show, so more_nub must not exist - a board
+    // with buttons but no battery/rotation (sample_gfx, cyd, cyd_tft) is the
+    // real-world case this covers.
     WindowLayout none = window_layout(&kZeroButtonBoard, 1);
+    CHECK(none.more_nub.w == 0);
+    CHECK(none.more_nub.h == 0);
     CHECK_FALSE(rects_overlap(none.more_nub, none.screen));
 }
 
@@ -347,6 +358,10 @@ TEST_CASE("sample_gfx (real zero-button target) gets a bare-screen layout") {
     CHECK(l.screen.h == t->board->height * 2);
     CHECK(l.screen.x == BEZEL_MARGIN);
     CHECK(l.screen.y == BEZEL_MARGIN);
+    // sample_gfx has neither battery nor rotation, so the panel the "..."
+    // nub would open has nothing to show - it must not exist either.
+    CHECK(l.more_nub.w == 0);
+    CHECK(l.more_nub.h == 0);
 }
 
 TEST_CASE("panel card stays nested inside the window even for a narrow real board") {
