@@ -133,7 +133,7 @@ static const std::string kSchema = std::string(R"JSON({
         { "name": "buttons", "description": "Physical button count.", "type": "number" },
         { "name": "battery", "description": "Board has a battery.", "type": "boolean" },
         { "name": "rotation", "description": "Board supports rotation.", "type": "boolean" },
-        { "name": "backend", "description": "native (runs in-process) or qemu (boots in a child QEMU process; serial/logs/serve only - see backend_unavailable for the env var contract).", "type": "string" }
+        { "name": "backend", "description": "native (runs in-process) or qemu (boots in a child QEMU process; serial/logs/serve only, and serve itself rejects --shot/--window/--ble-port there since there is no framebuffer or native BLE link - see backend_unavailable for the env var contract).", "type": "string" }
       ] },
     { "name": "ui", "description": "Snapshot the active LVGL widget tree as an array of elements; act on the refs with 'tap --ref'. Empty for non-LVGL targets.", "mutating": false, "stability": "stable",
       "example": { "args": ["--target", "agentgauge"], "stdin": "" },
@@ -218,7 +218,7 @@ static const std::string kSchema = std::string(R"JSON({
       "output_fields": [ { "name": "serial", "description": "Captured serial text.", "type": "string" } ] },
     { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless.", "mutating": true, "stability": "stable",
       "args": [ { "name": "file", "description": "Scenario JSON path.", "type": "string", "required": true } ] },
-    { "name": "serve", "description": "Boot and keep pumping so a live bridge can drive the device. HTTP: a bridge POSTs to the firmware's webserver (--port). BLE: --ble-port N exposes the virtual BLE link as newline-delimited JSON on a localhost TCP socket (connect = bonded central, lines in = host->device, device lines stream back; one client at a time). --window opens an interactive SDL window (mouse=touch, on-screen buttons + battery/USB/rotate controls). Human logs on stderr.", "mutating": true, "stability": "stable" },
+    { "name": "serve", "description": "Boot and keep pumping so a live bridge can drive the device. HTTP: a bridge POSTs to the firmware's webserver (--port). BLE: --ble-port N exposes the virtual BLE link as newline-delimited JSON on a localhost TCP socket (connect = bonded central, lines in = host->device, device lines stream back; one client at a time). --window opens an interactive SDL window (mouse=touch, on-screen buttons + battery/USB/rotate controls). Human logs on stderr. On a qemu-backed target, serve only boots and pumps serial I/O until interrupted: there is no framebuffer, HTTP webserver, or native BLE link, so --shot, --window, and --ble-port are all rejected as unsupported (see the backend field on list-targets).", "mutating": true, "stability": "stable" },
     { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), swipe (x1,y1,x2,y2), expect (text/absent/match), button, battery, rotate, gpio, wifi, ble (sub+data/passkey), snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
   ],
   "errors": [

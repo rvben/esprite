@@ -38,4 +38,13 @@ TEST_CASE("qemu_backend_install routes BACKEND_QEMU targets to the qemu backend"
     REQUIRE(t != nullptr);
     sim_backend_select(t);
     CHECK(std::string(sim_backend().name()) == "qemu");
+
+    // Restore the global backend selector to native: sim_tests runs every
+    // TEST_CASE in one process, and leaving this selected at qemu would make
+    // sim_backend() in later cases silently resolve to a singleton this case
+    // never boots or shuts down.
+    const SimTarget* native = sim_target("sample_gfx");
+    REQUIRE(native != nullptr);
+    sim_backend_select(native);
+    CHECK(std::string(sim_backend().name()) == "native");
 }
