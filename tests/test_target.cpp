@@ -35,7 +35,10 @@ TEST_CASE("SimButton defaults edge and pos when aggregate-initialized with 4 fie
 
 TEST_CASE("agentgauge buttons declare explicit ascending pos on EDGE_RIGHT") {
     const SimTarget* t = sim_target("agentgauge");
-    REQUIRE(t != nullptr);
+    if (!t) {
+        MESSAGE("skipped: agentgauge firmware not present");
+        return;
+    }
     REQUIRE(t->board->button_count == 3);
     float last_pos = -1.0f;
     for (int i = 0; i < t->board->button_count; i++) {
