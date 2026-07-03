@@ -202,17 +202,31 @@ only in the current fork release. `list-targets` reports each target's
 `backend`, and a missing emulator or image yields the `backend_unavailable`
 error kind with the missing piece named.
 
-Tier 2 (cooperating firmware) adds the display: build the firmware against
-Espressif's `esp_lcd_qemu_rgb` component and boot it on `qemu_esp32c3_rgb`
-(320x240 virtual RGB panel), and `screenshot`, `serve --shot`, and the live
-`--window` work exactly as on native targets, fed by QMP screendump. Draw
-full frames: the virtual panel consumes one pending draw per host-side
-capture, so per-line drawing stalls headless firmware.
+Tier 2 (cooperating firmware) adds the display and input: build the firmware
+against Espressif's `esp_lcd_qemu_rgb` component and boot it on
+`qemu_esp32c3_rgb` (320x240 virtual RGB panel), and `screenshot`,
+`serve --shot`, and the live `--window` work exactly as on native targets,
+fed by QMP screendump. Draw full frames: the virtual panel consumes one
+pending draw per host-side capture, so per-line drawing stalls headless
+firmware.
+
+Input is the same cooperation model: the firmware runs esprite's tiny
+`esprite_qemu_agent` component (tools/qemu/esprite_qemu_agent, one task on
+UART1), and `tap`, `swipe`, `gpio`, and `button` inject through it - the
+fork emulates no GPIO or touch hardware, so the firmware polls the agent's
+APIs (`esprite_agent_touch_events`, `esprite_agent_gpio_events`) instead of
+the hardware drivers. `scenario` runs on qemu targets too: `settle` is the
+portable time verb, and the `pixel` step (a framebuffer assertion with a
+retry deadline) plus byte-exact screenshot goldens make emulator UI tests
+deterministic; see `scenarios/qemu_esp32c3_rgb.json` for a tap-and-press
+example against the bundled fixture.
 
 Qemu targets are data, not code: `targets/qemu/*.json` (key, machine, arch,
-optional display dimensions) ship inside the binary, and
-`ESPRITE_QEMU_BOARD=/path/to/board.json` registers your own board at runtime
-without a rebuild. Input and networking over QEMU are on the roadmap.
+optional display dimensions, agent flag, buttons) ship inside the binary,
+and `ESPRITE_QEMU_BOARD=/path/to/board.json` registers your own board at
+runtime without a rebuild. Board-spec buttons render as bezel nubs in
+`--window` (view-only on qemu: window clicks do not route through the agent
+yet). Networking over QEMU is on the roadmap.
 
 ## How it works
 
