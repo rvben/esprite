@@ -54,12 +54,16 @@ fi
   0xe000 "$boot_app0" \
   0x10000 "$b/arduino_tick.ino.bin"
 
-# 3) esp_lcd_qemu_rgb quadrant-pattern demo for ESP32-C3 (the tier-2 display
-# fixture). Built in /tmp inside the container so the mounted source tree
-# never grows root-owned build/ or managed_components/ directories.
-docker run --rm -v "$PWD/tools/qemu/rgb_demo":/proj:ro -v "$out":/out \
+# 3) esp_lcd_qemu_rgb quadrant-pattern demo + esprite input agent for
+# ESP32-C3 (the tier-2 display/input fixture). Built in /tmp inside the
+# container so the mounted source tree never grows root-owned build/ or
+# managed_components/ directories; the agent component is copied as the
+# sibling directory the demo's EXTRA_COMPONENT_DIRS expects.
+docker run --rm -v "$PWD/tools/qemu/rgb_demo":/proj_demo:ro \
+  -v "$PWD/tools/qemu/esprite_qemu_agent":/proj_agent:ro -v "$out":/out \
   espressif/idf:release-v5.4 bash -ec '
-  cp -r /proj /tmp/rgb && cd /tmp/rgb
+  cp -r /proj_demo /tmp/rgb && cp -r /proj_agent /tmp/esprite_qemu_agent
+  cd /tmp/rgb
   idf.py set-target esp32c3 build
   cd build
   esptool.py --chip esp32c3 merge_bin --fill-flash-size 4MB \

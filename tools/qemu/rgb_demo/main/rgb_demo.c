@@ -1,29 +1,31 @@
-// QEMU display fixture: draws a fixed quadrant pattern on the fork's virtual
-// RGB panel (esp_rgb device, driven by the esp_lcd_qemu_rgb component), then
-// prints a serial marker and redraws once per second. The pattern is asserted
-// by esprite's gated display tests: TL red, TR green, BL blue, BR white.
+// QEMU display+input fixture: draws a fixed quadrant pattern on the fork's
+// virtual RGB panel and reacts to esprite's input agent. esprite's gated
+// tests assert it:
+//   - quadrants TL red, TR green, BL blue, BR white (RGB565);
+//   - a GPIO 9 button event (agent `pulse`) toggles color inversion
+//     (red<->green, blue<->white swap);
+//   - the LAST touch (held or released) leaves a latched 20x20 black square
+//     centered on it - black appears in no quadrant, so a pixel probe is
+//     unambiguous, and latching survives tap's press-then-release.
 //
-// Full-frame draws only: esp_rgb consumes a draw (and clears the busy flag
-// the driver spins on) in its console refresh callback, which headless QEMU
-// runs only when something pumps the console - one QMP screendump = one
-// consumed draw. Per-line drawing would need one screendump per line and
-// wedges headless; one draw per frame matches how esprite's sync_framebuffer
-// polls the panel. The first "rgb_demo ready" therefore appears right after
-// the first screendump consumes the initial frame.
+// Full-frame draws only, and state is polled via the agent's counters, not
+// level edges: a draw blocks until a host capture consumes it (see the M1
+// fixture notes), and a short pulse completing during that block would be
+// missed by level polling while the event counter never is.
 #include <stdio.h>
 #include <stdlib.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_qemu_rgb.h"
+#include "esprite_qemu_agent.h"
 
 #define W 320
 #define H 240
-
-void probe_uart_gpio_start(void);
+#define BTN_PIN 9
+#define SQ 20
 
 void app_main(void) {
-    xTaskCreate((TaskFunction_t)probe_uart_gpio_start, "probe", 4096, NULL, 5, NULL);
     esp_lcd_panel_handle_t panel = NULL;
     esp_lcd_rgb_qemu_config_t cfg = {
         .width = W,
@@ -34,23 +36,49 @@ void app_main(void) {
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
 
+    esprite_agent_start();
+
     uint16_t *fb = malloc(W * H * sizeof(uint16_t));
     if (!fb) {
         printf("rgb_demo alloc failed\n");
         return;
     }
-    for (int y = 0; y < H; y++) {
-        for (int x = 0; x < W; x++) {
-            fb[y * W + x] = (y < H / 2) ? (x < W / 2 ? 0xF800 : 0x07E0)    // red | green
-                                        : (x < W / 2 ? 0x001F : 0xFFFF);   // blue | white
-        }
-    }
+
+    int inv = 0, events_seen = 0;
+    int have_sq = 0, sq_x = 0, sq_y = 0;
     printf("rgb_demo drawing\n");
     for (;;) {
-        // Blocks until a host-side console refresh (e.g. a screendump)
-        // consumes the frame.
-        ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel, 0, 0, W, H, fb));
-        printf("rgb_demo ready\n");
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        int dirty = 0;
+        int events = esprite_agent_gpio_events(BTN_PIN);
+        if (events != events_seen) {
+            inv ^= (events - events_seen) & 1;
+            events_seen = events;
+            dirty = 1;
+        }
+        int tx, ty;
+        if (esprite_agent_touch(&tx, &ty) && (!have_sq || tx != sq_x || ty != sq_y)) {
+            have_sq = 1;
+            sq_x = tx;
+            sq_y = ty;
+            dirty = 1;
+        }
+        static int drawn_once = 0;
+        if (dirty || !drawn_once) {
+            drawn_once = 1;
+            uint16_t tl = inv ? 0x07E0 : 0xF800, tr = inv ? 0xF800 : 0x07E0;
+            uint16_t bl = inv ? 0xFFFF : 0x001F, br = inv ? 0x001F : 0xFFFF;
+            for (int y = 0; y < H; y++)
+                for (int x = 0; x < W; x++)
+                    fb[y * W + x] = (y < H / 2) ? (x < W / 2 ? tl : tr)
+                                                : (x < W / 2 ? bl : br);
+            if (have_sq)
+                for (int y = sq_y - SQ / 2; y < sq_y + SQ / 2; y++)
+                    for (int x = sq_x - SQ / 2; x < sq_x + SQ / 2; x++)
+                        if (x >= 0 && x < W && y >= 0 && y < H) fb[y * W + x] = 0x0000;
+            // Blocks until a host-side capture consumes the frame.
+            ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel, 0, 0, W, H, fb));
+            printf("rgb_demo state touch=%d inv=%d\n", have_sq, inv);
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
