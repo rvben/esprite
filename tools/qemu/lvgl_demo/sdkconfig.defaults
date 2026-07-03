@@ -1,0 +1,7 @@
+# The esp_lcd_qemu_rgb driver busy-waits until the host consumes each frame
+# (one QMP screendump = one consumed draw); that wait starves IDLE while a
+# frame is pending, so the task watchdog is off, exactly like the rgb fixture.
+CONFIG_ESP_TASK_WDT_INIT=n
+# Full-frame LVGL buffer (150 KB) plus LVGL internals need the room; no
+# networking in this firmware.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
