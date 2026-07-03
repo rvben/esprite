@@ -70,15 +70,19 @@ qemu-fetch:
 # Build QEMU test flash images (needs docker + arduino-cli): tests/fixtures/qemu/
 qemu-fixtures:
 	bash tools/qemu/build-fixtures.sh
+	bash tools/qemu/build-lvgl-fixture.sh
 
-# Regenerate the emulator golden screenshots from the display fixture's
-# scenario (needs qemu-fetch + qemu-fixtures). Eyeball the PNGs before
-# committing: the gated tests compare byte-exact.
+# Regenerate the emulator golden screenshots from the fixture scenarios
+# (needs qemu-fetch + qemu-fixtures). Eyeball the PNGs before committing:
+# the gated tests compare byte-exact.
 qemu-goldens: build
 	mkdir -p tests/goldens/qemu
 	cd tests/goldens/qemu && . ../../../.qemu/env.sh && \
 	  ESPRITE_QEMU_IMAGE=$(CURDIR)/tests/fixtures/qemu/rgb_c3.bin \
 	  ../../../$(BUILD)/esprite scenario ../../../scenarios/qemu_esp32c3_rgb.json
+	cd tests/goldens/qemu && . ../../../.qemu/env.sh && \
+	  ESPRITE_QEMU_IMAGE=$(CURDIR)/tests/fixtures/qemu/lvgl_c3.bin \
+	  ../../../$(BUILD)/esprite scenario ../../../scenarios/qemu_esp32c3_rgb_lvgl.json
 
 # Run the gated emulator integration tests (needs qemu-fetch + qemu-fixtures
 # to have been run first; sources .qemu/env.sh for ESPRITE_QEMU_RISCV32/XTENSA).

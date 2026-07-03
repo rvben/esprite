@@ -235,6 +235,27 @@ your own board at runtime without a rebuild. Board-spec buttons render as
 bezel nubs in `--window` (view-only on qemu: window clicks do not route
 through the agent yet).
 
+### Running a real LVGL app under the emulator
+
+`tools/qemu/lvgl_demo` is a genuine LVGL 9 application (a two-screen device
+control panel) proving the recipe end to end - same board spec as the rgb
+fixture, different image (`ESPRITE_QEMU_IMAGE` selects the firmware):
+
+- Registry deps: `lvgl/lvgl ^9`, `espressif/esp_lvgl_port ^2`,
+  `espressif/esp_lcd_qemu_rgb ^1`; esprite components:
+  `esprite_qemu_agent` (input transport) and `esp_lcd_touch_esprite` (the
+  standard `esp_lcd_touch` driver contract over the agent, so touch reaches
+  LVGL through a normal indev driver, no esprite-specific app code).
+- Display rule: full-refresh mode with a single static full-frame buffer
+  (the emulated panel consumes one draw per host capture; partial flushes
+  stall). On RAM-tight chips allocate the buffer statically and wire
+  `lv_display_create`/`set_buffers`/`set_flush_cb` yourself -
+  `lvgl_port_add_disp` only heap-allocates - keeping `esp_lvgl_port` for
+  task, tick, and locking.
+- esprite pumps display captures around every injection, so a UI task
+  blocked in a flush still observes taps; `scenarios/qemu_esp32c3_rgb_lvgl.json`
+  taps its switch and slider, presses BOOT, and byte-compares the frames.
+
 ## What each backend is authoritative for
 
 The two backends answer different questions. Host-native compiles the

@@ -8,6 +8,8 @@
 #include "WiFi.h"
 #include "Print.h"
 #include <strings.h>
+#include <chrono>
+#include <thread>
 
 // True when injection must route through the qemu guest agent instead of the
 // in-process input bus (the booted target runs in a child QEMU process).
@@ -149,9 +151,11 @@ ActionError apply_tap(int x, int y) {
         return {"bad_args", "tap needs x 0-" + std::to_string(b ? b->width - 1 : 0) +
                             " and y 0-" + std::to_string(b ? b->height - 1 : 0)};
     if (qemu_agent_active()) {
+        // Held guest-side: a live-state poller (an LVGL indev reading the
+        // agent's touch through the esp_lcd_touch adapter) must observe the
+        // press between its polls; 120 ms spans several default periods.
         std::string err;
-        if (!sim_backend().agent_touch(true, x, y, &err)) return {"agent_failed", err};
-        if (!sim_backend().agent_touch(false, x, y, &err)) return {"agent_failed", err};
+        if (!sim_backend().agent_tap(x, y, 120, &err)) return {"agent_failed", err};
         return {};
     }
     sim_input().touch_pressed = true;
@@ -171,13 +175,15 @@ ActionError apply_swipe(int x1, int y1, int x2, int y2) {
                             std::to_string(b ? b->width - 1 : 0) + " / 0-" +
                             std::to_string(b ? b->height - 1 : 0)};
     if (qemu_agent_active()) {
-        // Same waypoints as the native gesture; the guest firmware's own
-        // input poll rate decides how it reads the moving press.
+        // Same waypoints as the native gesture, paced so a live-state
+        // poller samples several intermediate positions (the held state is
+        // continuous guest-side; pacing only controls sampling density).
         std::string err;
         for (int i = 0; i <= 5; i++) {
             int x = x1 + (x2 - x1) * i / 5;
             int y = y1 + (y2 - y1) * i / 5;
             if (!sim_backend().agent_touch(true, x, y, &err)) return {"agent_failed", err};
+            std::this_thread::sleep_for(std::chrono::milliseconds(40));
         }
         if (!sim_backend().agent_touch(false, x2, y2, &err)) return {"agent_failed", err};
         return {};

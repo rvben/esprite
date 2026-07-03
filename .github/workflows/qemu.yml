@@ -34,12 +34,23 @@ jobs:
           path: tests/fixtures/qemu/rgb_c3.bin
           key: rgb-fixture-${{ hashFiles('tools/qemu/rgb_demo/**', 'tools/qemu/esprite_qemu_agent/**', 'tools/qemu/build-rgb-fixture.sh') }}
 
+      - name: Cache the LVGL firmware image
+        id: lvgl
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/qemu/lvgl_c3.bin
+          key: lvgl-fixture-${{ hashFiles('tools/qemu/lvgl_demo/**', 'tools/qemu/esprite_qemu_agent/**', 'tools/qemu/esp_lcd_touch_esprite/**', 'tools/qemu/build-lvgl-fixture.sh') }}
+
       - name: Fetch the emulator
         run: test -f .qemu/env.sh || make qemu-fetch
 
       - name: Build the fixture
         if: steps.fixture.outputs.cache-hit != 'true'
         run: bash tools/qemu/build-rgb-fixture.sh
+
+      - name: Build the LVGL firmware image
+        if: steps.lvgl.outputs.cache-hit != 'true'
+        run: bash tools/qemu/build-lvgl-fixture.sh
 
       - run: make build
 

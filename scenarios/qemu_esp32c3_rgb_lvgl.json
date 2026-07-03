@@ -1,0 +1,15 @@
+{
+  "target": "qemu_esp32c3_rgb",
+  "steps": [
+    { "cmd": "pixel", "x": 70, "y": 100, "value": 63488, "timeout_ms": 30000 },
+    { "cmd": "screenshot", "out": "lvgl-01-control.png" },
+    { "cmd": "tap", "x": 230, "y": 100 },
+    { "cmd": "pixel", "x": 70, "y": 100, "value": 2016, "timeout_ms": 10000 },
+    { "cmd": "tap", "x": 150, "y": 188 },
+    { "cmd": "pixel", "x": 280, "y": 188, "value": 19, "timeout_ms": 10000 },
+    { "cmd": "screenshot", "out": "lvgl-02-powered.png" },
+    { "cmd": "button", "which": "BOOT" },
+    { "cmd": "pixel", "x": 160, "y": 30, "value": 8, "timeout_ms": 10000 },
+    { "cmd": "screenshot", "out": "lvgl-03-about.png" }
+  ]
+}

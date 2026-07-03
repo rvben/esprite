@@ -43,6 +43,14 @@ struct SimBackend {
         if (err) *err = "no input agent on this backend";
         return false;
     }
+    // A press held guest-side for ms then released (the agent replies after
+    // the release). Live-state touch pollers - LVGL indev drivers - need the
+    // hold to observe the press at all.
+    virtual bool agent_tap(int x, int y, int ms, std::string* err) {
+        (void)x; (void)y; (void)ms;
+        if (err) *err = "no input agent on this backend";
+        return false;
+    }
 
     // The localhost TCP port where the booted firmware's HTTP server is
     // reachable, or 0 when it has none. Native: the webserver shim's bound
