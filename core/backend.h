@@ -21,6 +21,28 @@ struct SimBackend {
     // QMP screendump decoded into the framebuffer, so callers can always
     // sync-then-capture without branching on the backend.
     virtual bool sync_framebuffer(std::string* err) { (void)err; return true; }
+
+    // Tier-2 input injection via a cooperating guest agent (esprite_qemu_agent
+    // on a second UART chardev). Native input never routes here (it uses the
+    // in-process input bus in cli/actions.cpp), so the defaults report
+    // unavailability; the qemu backend implements them over its AgentLink
+    // when the target's machine spec declares the agent.
+    virtual bool agent_available() { return false; }
+    virtual bool agent_gpio(int pin, int level, std::string* err) {
+        (void)pin; (void)level;
+        if (err) *err = "no input agent on this backend";
+        return false;
+    }
+    virtual bool agent_pulse(int pin, int level, int ms, std::string* err) {
+        (void)pin; (void)level; (void)ms;
+        if (err) *err = "no input agent on this backend";
+        return false;
+    }
+    virtual bool agent_touch(bool down, int x, int y, std::string* err) {
+        (void)down; (void)x; (void)y;
+        if (err) *err = "no input agent on this backend";
+        return false;
+    }
     virtual const char* name() const = 0;          // "native" | "qemu"
 };
 
