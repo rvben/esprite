@@ -20,7 +20,10 @@
 #define W 320
 #define H 240
 
+void probe_uart_gpio_start(void);
+
 void app_main(void) {
+    xTaskCreate((TaskFunction_t)probe_uart_gpio_start, "probe", 4096, NULL, 5, NULL);
     esp_lcd_panel_handle_t panel = NULL;
     esp_lcd_rgb_qemu_config_t cfg = {
         .width = W,
