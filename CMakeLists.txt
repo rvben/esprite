@@ -207,6 +207,7 @@ add_library(qemu_backend STATIC
     backends/qemu/qmp.cpp
     backends/qemu/qemu_process.cpp
     backends/qemu/qemu_backend.cpp
+    backends/qemu/screendump.cpp
 )
 target_include_directories(qemu_backend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/backends/qemu)
 # ArduinoJson's optional Arduino String integration (ARDUINOJSON_ENABLE_ARDUINO_STRING,
@@ -258,6 +259,7 @@ add_executable(sim_tests
     tests/test_backend.cpp
     tests/test_qmp.cpp
     tests/test_qemu_process.cpp
+    tests/test_qemu_screendump.cpp
 )
 target_link_libraries(sim_tests PRIVATE cli_lib)
 link_sim_targets(sim_tests)
