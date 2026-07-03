@@ -245,7 +245,8 @@ target_include_directories(qemu_backend PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/shim
 # core: qemu_backend.cpp implements SimBackend and calls sim_backend_register
 # (core/backend.h, core/target.h). Core itself never links back against qemu
 # code, so the registration hook keeps that layering one-directional.
-target_link_libraries(qemu_backend PUBLIC ArduinoJson core)
+# peripherals: sync_framebuffer decodes screendumps into sim_framebuffer().
+target_link_libraries(qemu_backend PUBLIC ArduinoJson core peripherals)
 esprite_warnings(qemu_backend)
 
 # Shared CLI implementation, linked by both the binary and the test runner.

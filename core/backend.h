@@ -15,6 +15,12 @@ struct SimBackend {
     virtual void tick() = 0;                       // serve-loop pump; native = run steps
     virtual std::string serial_output() = 0;
     virtual bool serial_inject(const std::string& data) = 0;
+    // Refresh sim_framebuffer() with the display's current pixels. Native
+    // firmware renders in-process so the framebuffer is always current: the
+    // default is a successful no-op. The qemu backend implements it with a
+    // QMP screendump decoded into the framebuffer, so callers can always
+    // sync-then-capture without branching on the backend.
+    virtual bool sync_framebuffer(std::string* err) { (void)err; return true; }
     virtual const char* name() const = 0;          // "native" | "qemu"
 };
 
