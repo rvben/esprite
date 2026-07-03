@@ -1,9 +1,9 @@
 # The agentgauge firmware (a Wi-Fi AI coding-agent rate-limit desk gauge),
 # compiled once from source against the sim shims into agentgauge_fw. There is
 # one board (480x480 AMOLED, two side buttons + PWR), so this firmware is not
-# runtime board_caps()-switched across variants; the single targets/agentgauge
-# board links it directly. Firmware files are referenced read-only from
-# AGENTGAUGE_SRC and never modified.
+# runtime board_caps()-switched across variants; the single
+# targets/waveshare_amoled_18 board links it directly. Firmware files are
+# referenced read-only from AGENTGAUGE_SRC and never modified.
 
 set(AG ${AGENTGAUGE_SRC})
 
@@ -61,14 +61,15 @@ endforeach()
 
 list(TRANSFORM AGENTGAUGE_SIM_SOURCES PREPEND ${AG}/)
 
+# Inter LVGL font sources (lv_font_conv output). Globbed rather than listed:
+# the firmware adds/drops font sizes as its UI evolves, and a stale hard-coded
+# list breaks configure on a missing file. The *.cpp drift check above does not
+# cover *.c, so the glob is the skew tolerance here.
+file(GLOB AGENTGAUGE_FONT_SOURCES CONFIGURE_DEPENDS ${AG}/font_*.c)
+
 add_library(agentgauge_fw STATIC
     ${AGENTGAUGE_SIM_SOURCES}
-    # Inter LVGL font sources (lv_font_conv output, not globbed above since
-    # the drift check only watches *.cpp - see AGENTGAUGE_SIM_SOURCES).
-    ${AG}/font_inter_16.c
-    ${AG}/font_inter_24.c
-    ${AG}/font_inter_48.c
-    ${AG}/font_inter_64.c
+    ${AGENTGAUGE_FONT_SOURCES}
     # Sim board adapter: the firmware's hal/*.h contract bound to the virtual
     # peripherals (framebuffer, injected touch/button/battery state).
     ${CMAKE_CURRENT_LIST_DIR}/board_sim/board_caps.cpp
