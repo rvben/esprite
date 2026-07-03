@@ -230,7 +230,9 @@ bool QemuProcess::spawn_only(const std::vector<std::string>& argv, std::string* 
     posix_spawn_file_actions_destroy(&actions);
 
     if (spawn_rc != 0) {
-        set_err(err, std::string("posix_spawn: ") + strerror(spawn_rc));
+        // Name the binary: "No such file or directory" alone is useless to a
+        // caller assembling the path from env vars.
+        set_err(err, "posix_spawn " + argv[0] + ": " + strerror(spawn_rc));
         close_if_open(in_pipe[0]);
         close_if_open(in_pipe[1]);
         close_if_open(out_pipe[0]);
@@ -303,7 +305,15 @@ void QemuProcess::pump() {
     char buf[4096];
     for (;;) {
         ssize_t n = ::read(out_fd, buf, sizeof(buf));
-        if (n > 0) { captured.append(buf, (size_t)n); continue; }
+        if (n > 0) {
+            captured.append(buf, (size_t)n);
+            // Keep a bounded tail (see kSerialCaptureCap): drop the front
+            // half when past the cap, so trimming amortizes instead of
+            // shifting the whole buffer on every append.
+            if (captured.size() > kSerialCaptureCap)
+                captured.erase(0, captured.size() - kSerialCaptureCap / 2);
+            continue;
+        }
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return;   // nothing pending right now
         if (n < 0 && errno == EINTR) continue;
         // n == 0 (EOF) or a genuine read error: the child closed its end (or

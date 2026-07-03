@@ -235,6 +235,37 @@ your own board at runtime without a rebuild. Board-spec buttons render as
 bezel nubs in `--window` (view-only on qemu: window clicks do not route
 through the agent yet).
 
+## What each backend is authoritative for
+
+The two backends answer different questions. Host-native compiles the
+firmware's source against shims: it is the fast, deterministic authority on
+the app's own behavior, and it can see inside (the `ui` snapshot-ref model
+walks the live LVGL tree). QEMU runs the real compiled image: it is the
+authority on everything below the app that shims cannot reproduce, at the
+cost of wall-clock timing and firmware cooperation for anything beyond
+serial.
+
+| Capability | Host-native | QEMU tier 1 (any image) | QEMU tier 2 (cooperating firmware) |
+|---|---|---|---|
+| App logic, UI rendering, data parsing | authoritative | runs, observable via serial | runs, observable via display |
+| RTOS scheduling, heap/stack pressure, watchdogs | not visible | authoritative | authoritative |
+| Toolchain/arch bugs, binary-only components, unbuildable images | no | yes | yes |
+| Serial, logs | yes | yes | yes |
+| Display (`screenshot`, `serve --shot/--window`) | yes | no | yes (`esp_lcd_qemu_rgb`) |
+| Input (`tap`, `swipe`, `gpio`, `button`) | yes | no | yes (`esprite_qemu_agent`) |
+| HTTP `snapshot` | yes | no | yes (openeth + port forward) |
+| `ui` widget refs | yes | no | no (out of process, inherent) |
+| BLE (virtual link, `--ble-port`) | yes | no | no (not emulated upstream) |
+| `battery`, `rotate`, `motion` | yes | no | no |
+| Time control | `steps` (exact loop iterations) | `settle` (wall-clock) | `settle` (wall-clock) |
+| Determinism | fully deterministic (virtual clock) | ESP32-C3: byte-exact serial across runs; ESP32/S3: wall-clock, load-sensitive | same per architecture |
+| Boot speed | milliseconds | seconds | seconds |
+
+Tier 2 is a firmware choice, not an esprite switch: build against the
+QEMU-facing components listed above and declare the matching capabilities in
+the board spec. Anything a target cannot do fails as `unsupported` with the
+missing piece named, never silently.
+
 ## How it works
 
 The firmware's own source files are compiled unchanged. Only two things are

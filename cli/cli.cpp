@@ -27,7 +27,10 @@
 #include <thread>
 #include <chrono>
 #include <cctype>
+#include <cerrno>
 #include <csignal>
+#include <fcntl.h>
+#include <poll.h>
 #include <unistd.h>
 
 // Steps to run after a serial injection before checking for a match: enough
@@ -97,13 +100,63 @@ static bool sim_interrupted() { return g_interrupted != 0; }
 // (a public entry point tests call directly, bypassing esprite_main) and
 // safe across the repeated in-process esprite_main calls the test suite
 // makes.
+// Self-pipe companion to g_interrupted: the handler also writes one byte
+// here, so the daemon's pre-read poll() wakes even when the signal was
+// delivered and consumed in the gap AFTER the loop's flag check but BEFORE
+// its read blocked - the one window EINTR cannot cover, because by then no
+// further signal will arrive to interrupt the read. Nonblocking on both
+// ends: a full pipe must never block the handler (write() just fails, and
+// one unread byte already guarantees the poll wakes).
+static int g_sigpipe[2] = {-1, -1};
+
 static void install_signal_handlers() {
+    if (g_sigpipe[0] < 0 && pipe(g_sigpipe) == 0) {
+        for (int fd : g_sigpipe) {
+            fcntl(fd, F_SETFL, O_NONBLOCK);
+            fcntl(fd, F_SETFD, FD_CLOEXEC);
+        }
+    }
     struct sigaction sa {};
-    sa.sa_handler = [](int) { g_interrupted = 1; };
+    sa.sa_handler = [](int) {
+        g_interrupted = 1;
+        if (g_sigpipe[1] >= 0) {
+            // write() is async-signal-safe; the result is irrelevant (a
+            // full pipe still holds an unread wake-up byte).
+            ssize_t ignored = write(g_sigpipe[1], "x", 1);
+            (void)ignored;
+        }
+    };
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;   // deliberately no SA_RESTART - see comment above
     sigaction(SIGINT, &sa, nullptr);
     sigaction(SIGTERM, &sa, nullptr);
+}
+
+// Drains any stale wake-up bytes (e.g. from a signal a previous in-process
+// invocation already handled) so an old byte cannot end a fresh session.
+static void drain_sigpipe() {
+    char buf[16];
+    while (g_sigpipe[0] >= 0 && read(g_sigpipe[0], buf, sizeof(buf)) > 0) {}
+}
+
+// Waits until `fd` has input or shutdown is requested. True = read now
+// (data or EOF ready); false = interrupted. Safe to combine with stdio ONLY
+// because esprite_daemon switches its input stream to unbuffered first:
+// with stdio buffering, bytes already pulled into the FILE's buffer would
+// be invisible to poll() and the session would deadlock mid-pipeline (a
+// prior fd-polling attempt hit exactly that).
+static bool daemon_wait_input(int fd) {
+    for (;;) {
+        if (sim_interrupted()) return false;
+        pollfd fds[2] = {{fd, POLLIN, 0}, {g_sigpipe[0], POLLIN, 0}};
+        int n = ::poll(fds, g_sigpipe[0] >= 0 ? 2 : 1, -1);
+        if (n < 0) {
+            if (errno == EINTR) continue;   // loop re-checks the flag
+            return false;
+        }
+        if (fds[1].revents) return false;                    // shutdown wake-up
+        if (fds[0].revents & (POLLIN | POLLHUP | POLLERR)) return true;
+    }
 }
 
 // Commands a qemu-backed target currently supports (tier 1: serial
@@ -954,6 +1007,16 @@ int esprite_daemon(FILE* in, FILE* out) {
     char line[16384];
     bool booted = false;
     bool is_qemu = false;
+    // A pollable input stream (a real pipe/tty; memory streams report no fd
+    // and cannot block, so they skip all of this) goes unbuffered so
+    // daemon_wait_input's poll() sees every byte stdio would otherwise hide
+    // in its buffer, then waits fd-level before each line. This closes the
+    // signal-after-check-before-block window the EINTR comment below cannot:
+    // the handler's self-pipe byte survives until the poll looks at it.
+    int in_fd = fileno(in);
+    bool pollable = in_fd >= 0;
+    if (pollable) setvbuf(in, nullptr, _IONBF, 0);
+    drain_sigpipe();
     // fgets() below blocks waiting for the next command line, which is where
     // this loop spends nearly all of its time. install_signal_handlers()
     // installs SIGINT/SIGTERM via sigaction with SA_RESTART cleared (not
@@ -976,7 +1039,8 @@ int esprite_daemon(FILE* in, FILE* out) {
     // no further EINTR will ever arrive to interrupt the *next* fgets() -
     // without this check that call would block indefinitely on a
     // still-open stdin even though g_interrupted is already set.
-    while (!sim_interrupted() && fgets(line, sizeof(line), in)) {
+    while (!sim_interrupted() && (!pollable || daemon_wait_input(in_fd)) &&
+           fgets(line, sizeof(line), in)) {
         // A line beyond the buffer would otherwise be parsed as two commands,
         // desyncing 1-in/1-out reply pairing. Drain it and reply with one error.
         if (!strchr(line, '\n') && !feof(in)) {

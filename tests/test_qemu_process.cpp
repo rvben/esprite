@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <chrono>
 #include <string>
+#include <thread>
 #include <vector>
 
 TEST_CASE("qemu argv is exact with icount") {
@@ -61,6 +62,31 @@ TEST_CASE("allocate_ephemeral_port returns a usable localhost port") {
     CHECK(p <= 65535);
 }
 
+TEST_CASE("serial capture keeps a bounded tail window") {
+    // A long-lived child (serve can run for hours) must not grow the capture
+    // without limit; recent output is what expect regexes and failure tails
+    // read, so the front is what gets dropped. /bin/sh floods well past the
+    // cap and ends with a marker that must survive.
+    QemuProcess p;
+    std::string err;
+    std::string flood = "yes 0123456789abcdef0123456789abcdef | head -c "
+                        + std::to_string(kSerialCaptureCap * 2)
+                        + "; printf 'TAIL-MARKER\\n'";
+    REQUIRE_MESSAGE(p.spawn_only({"/bin/sh", "-c", flood}, &err), err);
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (p.running() && std::chrono::steady_clock::now() < deadline) {
+        p.pump();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    p.pump();
+    p.stop();
+    CHECK(p.serial_output().size() <= kSerialCaptureCap);
+    CHECK_MESSAGE(p.serial_output().find("TAIL-MARKER") != std::string::npos,
+                   "tail lost; capture ends with: ",
+                   p.serial_output().substr(p.serial_output().size() > 60
+                                            ? p.serial_output().size() - 60 : 0));
+}
+
 TEST_CASE("child lifecycle: spawn, capture stdout, orderly stop") {
     // Uses /bin/cat with spawn_only() (spawn without QMP connect) so the
     // process plumbing is tested without QEMU. echo via stdin -> stdout.
@@ -72,6 +98,20 @@ TEST_CASE("child lifecycle: spawn, capture stdout, orderly stop") {
     for (int i = 0; i < 100 && p.serial_output().empty(); ++i) { p.pump(); usleep(10000); }
     CHECK(p.serial_output() == "hello\n");
     p.stop();
+    CHECK(!p.running());
+}
+
+TEST_CASE("spawning a missing binary fails synchronously and names the path") {
+    // Both libcs report exec failure from posix_spawn itself (glibc has done
+    // so since 2.26), so the contract is a false return with the offending
+    // path in the message - the ubuntu CI leg proves the glibc half. The
+    // qemu backend access()-checks resolved binaries first; this locks the
+    // reporting for direct callers.
+    QemuProcess p;
+    std::string err;
+    CHECK_FALSE(p.spawn_only({"/nonexistent/esprite-test-qemu-binary"}, &err));
+    CHECK_MESSAGE(err.find("/nonexistent/esprite-test-qemu-binary") != std::string::npos,
+                   "message does not name the path: ", err);
     CHECK(!p.running());
 }
 

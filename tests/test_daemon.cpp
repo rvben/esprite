@@ -2,7 +2,11 @@
 #include "cli.h"
 #include <cstdio>
 #include <cstdlib>
+#include <csignal>
 #include <string>
+#include <chrono>
+#include <thread>
+#include <unistd.h>
 
 // Drive a full `run` session in-process: feed newline-delimited JSON commands,
 // return the concatenated replies. Uses the real esprite_daemon entry point.
@@ -26,6 +30,47 @@ static int reply_count(const std::string& out) {
     int n = 0;
     for (char c : out) if (c == '\n') ++n;
     return n;
+}
+
+TEST_CASE("run session: a signal while idle on a real fd ends the session promptly") {
+    // The session's steady state blocks waiting for the next command line on
+    // a pipe that never delivers one. One SIGTERM - whether it lands while
+    // blocked (EINTR) or in the check-then-block gap (self-pipe wake-up) -
+    // must end the session promptly; hanging until the next input line is
+    // the failure this guards against. The safety writer unblocks a hung
+    // daemon after 5 s so a regression fails fast instead of wedging ctest.
+    int fds[2];
+    REQUIRE(pipe(fds) == 0);
+    FILE* in = fdopen(fds[0], "r");
+    REQUIRE(in != nullptr);
+    char* buf = nullptr;
+    size_t len = 0;
+    FILE* out = open_memstream(&buf, &len);
+    REQUIRE(out != nullptr);
+
+    std::thread killer([] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        raise(SIGTERM);
+    });
+    bool done = false;
+    std::thread safety([&] {
+        for (int i = 0; i < 50 && !done; i++)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (!done) { ssize_t ignored = write(fds[1], "\n", 1); (void)ignored; }
+    });
+
+    auto start = std::chrono::steady_clock::now();
+    esprite_daemon(in, out);
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - start).count();
+    done = true;
+    killer.join();
+    safety.join();
+    fclose(in);
+    close(fds[1]);
+    fclose(out);
+    free(buf);
+    CHECK_MESSAGE(elapsed < 3000, "session ignored the signal for ", elapsed, " ms");
 }
 
 TEST_CASE("run session: error replies use the kind/message envelope of the one-shot CLI") {

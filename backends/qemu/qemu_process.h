@@ -38,6 +38,12 @@ struct QemuSpec {
 // tests/test_qemu_process.cpp for the flags this must always/never emit.
 std::vector<std::string> qemu_build_argv(const QemuSpec& spec);
 
+// Upper bound on the retained child serial capture. A long-lived child
+// (serve runs for hours) floods stdout indefinitely; consumers - expect
+// regexes, failure-tail diagnostics - only ever read recent output, so the
+// capture keeps a tail window and drops the front.
+constexpr size_t kSerialCaptureCap = 1024 * 1024;
+
 // Binds 127.0.0.1:0, reads the kernel-assigned port back, and releases it
 // for the QEMU child to claim via hostfwd. The tiny claim race is acceptable
 // for a test tool (retry by rebooting the target). Returns 0 with *err on
