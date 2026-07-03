@@ -1,8 +1,12 @@
 {
   "key": "qemu_esp32c3_rgb",
   "name": "QEMU ESP32-C3 + virtual RGB panel",
-  "description": "Real flash image on Espressif QEMU with the esp_rgb display (tier 2: serial/logs/screenshot/serve --shot/--window; firmware must drive esp_lcd_qemu_rgb; image via ESPRITE_QEMU_IMAGE)",
+  "description": "Real flash image on Espressif QEMU with the esp_rgb display and input agent (tier 2: serial/logs/screenshot/tap/gpio/button/serve; firmware must drive esp_lcd_qemu_rgb and run esprite_qemu_agent; image via ESPRITE_QEMU_IMAGE)",
   "machine": "esp32c3",
   "arch": "riscv32",
-  "display": { "width": 320, "height": 240 }
+  "display": { "width": 320, "height": 240 },
+  "agent": true,
+  "buttons": [
+    { "label": "BOOT", "gpio": 9, "key": "b", "edge": "right", "pos": 0.5 }
+  ]
 }

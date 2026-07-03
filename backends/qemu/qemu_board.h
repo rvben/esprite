@@ -1,7 +1,19 @@
 #pragma once
 #include <string>
+#include <vector>
 
 struct SimTarget;
+
+// A physical control in a qemu board spec: pressed by pulsing its pin
+// through the guest input agent. Renders as a bezel nub like native buttons.
+struct QemuButtonSpec {
+    std::string label;        // e.g. "BOOT"
+    int gpio = -1;            // agent pin, 0..63
+    std::string key;          // optional single-char keyboard shortcut
+    std::string edge = "right";
+    float pos = -1.0f;        // 0..1 along the edge; -1 = auto-stack
+    bool active_low = true;   // pressing drives the pin low (pullup wiring)
+};
 
 // A qemu board spec parsed from JSON (targets/qemu/*.json embedded at build
 // time, or a user file via ESPRITE_QEMU_BOARD). Emulator targets are data,
@@ -14,6 +26,8 @@ struct QemuBoardSpec {
     std::string arch;         // "riscv32" | "xtensa" (selects ESPRITE_QEMU_<ARCH>)
     int display_w = 0;        // 0 = no display (tier 1, serial only)
     int display_h = 0;
+    bool agent = false;       // firmware carries esprite_qemu_agent on UART1
+    std::vector<QemuButtonSpec> buttons;   // requires agent
 };
 
 // Pure parse + validation; no registration, so it is unit-testable without
