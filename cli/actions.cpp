@@ -225,6 +225,10 @@ ActionError apply_gpio(int pin, int level) {
 ActionError apply_wifi(const std::string& state) {
     if (state != "up" && state != "down")
         return {"bad_args", "wifi needs 'up' or 'down'"};
+    // The simulated Wi-Fi link is a native shim; flipping it under a qemu
+    // guest (which runs its own network stack) would silently do nothing.
+    if (qemu_agent_active())
+        return {"unsupported", "wifi is native-only (a qemu guest runs its own network stack)"};
     sim_wifi_set_connected(state == "up");
     sim_run_steps(5);
     return {};

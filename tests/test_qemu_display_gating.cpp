@@ -109,6 +109,16 @@ TEST_CASE("button accepts a board button label on a native target") {
     CHECK(err.find("\"kind\":\"bad_args\"") != std::string::npos);
 }
 
+TEST_CASE("wifi stays gated on qemu targets at the pre-boot gate") {
+    // The simulated Wi-Fi link is a native shim; the command gate rejects it
+    // for qemu targets before any boot (and the applier double-checks for
+    // scenario steps).
+    clear_qemu_env();
+    std::string err;
+    CHECK(run_cli_err({"esprite", "wifi", "down", "--target", "qemu_esp32c3_rgb"}, &err) == 7);
+    CHECK(err.find("\"kind\":\"unsupported\"") != std::string::npos);
+}
+
 TEST_CASE("schema documents agent_failed with exit code 10") {
     std::string out;
     CHECK(run_cli_out({"esprite", "schema"}, &out) == 0);

@@ -308,51 +308,28 @@ The runtime is single-threaded and deterministic: `millis()` is driven by
 `delay()` and the step count, so a given number of `loop()` iterations always
 produces the same frame. Injected input and data are applied between steps.
 
-## Onboarding a target
+## Onboarding and project integration
 
-Add `targets/<name>/` with a `CMakeLists.txt`, a `board.cpp` that registers the
-target, and either:
+Two guides cover adoption end to end:
 
-- **nothing else**, if the app only uses APIs the shims already cover (Serial,
-  Wire, WiFi, Arduino_GFX). See `targets/sample_gfx/`.
-- **a small board adapter**, if the app hides hardware behind its own HAL. See
-  `firmwares/agentgauge/board_sim/`, which implements agentgauge's HAL
-  interfaces (display, touch, power, input, board_caps) against the
-  framebuffer and the injected input bus.
+- **[docs/onboarding.md](docs/onboarding.md)** - adding your firmware: the
+  zero-adapter path for standard sketches, the HAL-adapter path for real
+  products (firmware compiled once, boards as small profiles), and QEMU
+  board specs as JSON (no esprite changes at all).
+- **[docs/integration.md](docs/integration.md)** - using esprite as a test
+  harness inside your firmware repo: the Makefile pattern, the scenario step
+  reference, driving it from agents (`schema`, the `run` session, widget
+  refs), and worked CI examples for both backends.
 
-Register the target in `board.cpp`:
+## Host-native approximations
 
-```cpp
-#include "target.h"
-void mysketch_setup();
-void mysketch_loop();
-static const BoardDesc kBoard = {"My Board", 320, 240, 0, false, false, false};
-static const SimTarget kTarget = {"myapp", "description", mysketch_setup, mysketch_loop, &kBoard};
-namespace { struct Reg { Reg() { sim_register_target(&kTarget); } } g_reg; }
-```
-
-Entry points are renamed at compile time (`setup` -> `myapp_setup`) so multiple
-targets coexist in one binary; see the target CMakeLists for the two-line rule.
-
-## Fidelity
-
-**Faithful:** application logic, UI rendering (fonts, icons, animations,
-responsive layout), screen and state machines, the app's real data-parsing
-paths (its HTTP handlers), GPIO and peripheral behavior at the API level, and
-NVS persistence. A generic virtual BLE link (`peripherals/ble`) is also
-available for a firmware that binds it, with its own protocol parser and HID
-mapping run for real against the link; no onboarded target uses it today.
-
-**Approximated, not faithful:** virtual time rather than RTOS scheduling; instant
+The host-native backend compiles source against shims, so some things are
+approximated by design: virtual time rather than RTOS scheduling; instant
 faked Wi-Fi and BLE with no real radio (no MTU fragmentation, advertising
 intervals, or bonding storage); no QSPI or panel electrical quirks; no PSRAM
-exhaustion; audio is silent.
-
-This is not a substitute for on-hardware QA of timing, radio, or panel behavior.
-The host-native backend is authoritative for UI, layout, and data-path
-rendering. The QEMU backend runs the real compiled binary and is authoritative
-for serial-observable firmware behavior (RTOS scheduling, heap, watchdogs,
-binary-only components); it has no display, input, or networking yet.
+exhaustion; audio is silent. Neither backend substitutes for on-hardware QA
+of timing, radio, or panel electrical behavior - the matrix above says which
+backend to trust for everything else.
 
 ## Notes
 
