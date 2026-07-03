@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <chrono>
 #include <string>
+#include <thread>
 #include <vector>
 
 TEST_CASE("qemu argv is exact with icount") {
@@ -59,6 +60,31 @@ TEST_CASE("allocate_ephemeral_port returns a usable localhost port") {
     int p = allocate_ephemeral_port(&err);
     CHECK_MESSAGE(p > 0, err);
     CHECK(p <= 65535);
+}
+
+TEST_CASE("serial capture keeps a bounded tail window") {
+    // A long-lived child (serve can run for hours) must not grow the capture
+    // without limit; recent output is what expect regexes and failure tails
+    // read, so the front is what gets dropped. /bin/sh floods well past the
+    // cap and ends with a marker that must survive.
+    QemuProcess p;
+    std::string err;
+    std::string flood = "yes 0123456789abcdef0123456789abcdef | head -c "
+                        + std::to_string(kSerialCaptureCap * 2)
+                        + "; printf 'TAIL-MARKER\\n'";
+    REQUIRE_MESSAGE(p.spawn_only({"/bin/sh", "-c", flood}, &err), err);
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    while (p.running() && std::chrono::steady_clock::now() < deadline) {
+        p.pump();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    p.pump();
+    p.stop();
+    CHECK(p.serial_output().size() <= kSerialCaptureCap);
+    CHECK_MESSAGE(p.serial_output().find("TAIL-MARKER") != std::string::npos,
+                   "tail lost; capture ends with: ",
+                   p.serial_output().substr(p.serial_output().size() > 60
+                                            ? p.serial_output().size() - 60 : 0));
 }
 
 TEST_CASE("child lifecycle: spawn, capture stdout, orderly stop") {

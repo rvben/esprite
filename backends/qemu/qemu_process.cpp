@@ -303,7 +303,15 @@ void QemuProcess::pump() {
     char buf[4096];
     for (;;) {
         ssize_t n = ::read(out_fd, buf, sizeof(buf));
-        if (n > 0) { captured.append(buf, (size_t)n); continue; }
+        if (n > 0) {
+            captured.append(buf, (size_t)n);
+            // Keep a bounded tail (see kSerialCaptureCap): drop the front
+            // half when past the cap, so trimming amortizes instead of
+            // shifting the whole buffer on every append.
+            if (captured.size() > kSerialCaptureCap)
+                captured.erase(0, captured.size() - kSerialCaptureCap / 2);
+            continue;
+        }
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return;   // nothing pending right now
         if (n < 0 && errno == EINTR) continue;
         // n == 0 (EOF) or a genuine read error: the child closed its end (or
