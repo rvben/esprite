@@ -35,6 +35,12 @@ void esprite_agent_start(void);
 // indev read callback).
 bool esprite_agent_touch(int* x, int* y);
 
+// Monotonic count of `touch` commands, filling x/y with the most recent
+// coordinates. A host tap (press immediately followed by release) can come
+// and go between two live polls; the counter never misses it. Poll the
+// delta, mirror of esprite_agent_gpio_events.
+int esprite_agent_touch_events(int* x, int* y);
+
 // Latest injected level for a pin (0..63), or default_level if that pin was
 // never injected. Replaces gpio_get_level for agent-cooperating firmware.
 int esprite_agent_gpio_level(int pin, int default_level);

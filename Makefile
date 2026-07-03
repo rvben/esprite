@@ -11,7 +11,7 @@ ifdef AGENTGAUGE_SRC
 CMAKE_ARGS += -DAGENTGAUGE_SRC=$(AGENTGAUGE_SRC)
 endif
 
-.PHONY: configure build test screenshot scenario goldens release install dist clean qemu-fetch qemu-fixtures qemu-test
+.PHONY: configure build test screenshot scenario goldens release install dist clean qemu-fetch qemu-fixtures qemu-test qemu-goldens
 
 configure:
 	cmake -S . -B $(BUILD) $(CMAKE_ARGS)
@@ -70,6 +70,15 @@ qemu-fetch:
 # Build QEMU test flash images (needs docker + arduino-cli): tests/fixtures/qemu/
 qemu-fixtures:
 	bash tools/qemu/build-fixtures.sh
+
+# Regenerate the emulator golden screenshots from the display fixture's
+# scenario (needs qemu-fetch + qemu-fixtures). Eyeball the PNGs before
+# committing: the gated tests compare byte-exact.
+qemu-goldens: build
+	mkdir -p tests/goldens/qemu
+	cd tests/goldens/qemu && . ../../../.qemu/env.sh && \
+	  ESPRITE_QEMU_IMAGE=$(CURDIR)/tests/fixtures/qemu/rgb_c3.bin \
+	  ../../../$(BUILD)/esprite scenario ../../../scenarios/qemu_esp32c3_rgb.json
 
 # Run the gated emulator integration tests (needs qemu-fetch + qemu-fixtures
 # to have been run first; sources .qemu/env.sh for ESPRITE_QEMU_RISCV32/XTENSA).

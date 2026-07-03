@@ -55,8 +55,14 @@ void app_main(void) {
             events_seen = events;
             dirty = 1;
         }
+        // Event counter, not the live held state: a host tap releases within
+        // milliseconds and a 50 ms poll would miss it, while the counter
+        // catches every press with its latest coordinates.
+        static int touch_seen = 0;
         int tx, ty;
-        if (esprite_agent_touch(&tx, &ty) && (!have_sq || tx != sq_x || ty != sq_y)) {
+        int touches = esprite_agent_touch_events(&tx, &ty);
+        if (touches != touch_seen) {
+            touch_seen = touches;
             have_sq = 1;
             sq_x = tx;
             sq_y = ty;

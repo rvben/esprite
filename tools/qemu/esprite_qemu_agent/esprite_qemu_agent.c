@@ -14,6 +14,7 @@
 // low-rate control traffic, so no stronger synchronization is needed.
 static volatile bool s_touch_held = false;
 static volatile int s_touch_x = 0, s_touch_y = 0;
+static volatile int s_touch_events = 0;
 static volatile signed char s_gpio_level[MAX_PIN + 1];   // -1 = never injected
 static volatile int s_gpio_events[MAX_PIN + 1];
 
@@ -22,6 +23,12 @@ bool esprite_agent_touch(int* x, int* y) {
     if (x) *x = s_touch_x;
     if (y) *y = s_touch_y;
     return true;
+}
+
+int esprite_agent_touch_events(int* x, int* y) {
+    if (x) *x = s_touch_x;
+    if (y) *y = s_touch_y;
+    return s_touch_events;
 }
 
 int esprite_agent_gpio_level(int pin, int default_level) {
@@ -90,6 +97,7 @@ static void handle_line(char* line) {
         s_touch_x = (int)x;
         s_touch_y = (int)y;
         s_touch_held = true;
+        s_touch_events++;
         reply("ok");
     } else if (strcmp(cmd, "release") == 0) {
         s_touch_held = false;
