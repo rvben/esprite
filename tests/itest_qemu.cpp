@@ -323,6 +323,51 @@ TEST_CASE("CLI scenario: tap and button drive the guest, goldens match byte-exac
     }
 }
 
+TEST_CASE("CLI scenario: a real LVGL firmware is drivable end to end") {
+    // The lvgl_c3.bin image is a genuine LVGL 9 application (standard
+    // esp_lvgl_port + esp_lcd_touch stack; see tools/qemu/lvgl_demo) on the
+    // SAME board spec as the rgb fixture - the image, not the board, is the
+    // firmware, which is the decoupling this test locks in. Taps flip its
+    // switch and set its slider; BOOT changes screens; frames byte-match
+    // the committed goldens.
+    std::string bin, img;
+    if (!qemu_env(&bin, &img, "ESPRITE_QEMU_RISCV32", "lvgl_c3.bin")) {
+        MESSAGE("skipped: QEMU env/fixtures missing (ESPRITE_QEMU_RISCV32 / lvgl_c3.bin)");
+        return;
+    }
+    std::string scn_src = resolve_repo_file("scenarios/qemu_esp32c3_rgb_lvgl.json");
+    REQUIRE_MESSAGE(!scn_src.empty(), "scenarios/qemu_esp32c3_rgb_lvgl.json not found");
+    std::string dir = "/tmp/esprite_itest_qemu_lvgl";
+    system(("rm -rf " + dir + " && mkdir -p " + dir).c_str());
+    std::string body = slurp_file(scn_src);
+    const char* names[] = {"lvgl-01-control.png", "lvgl-02-powered.png", "lvgl-03-about.png"};
+    for (const char* name : names) {
+        size_t at = body.find(name);
+        REQUIRE(at != std::string::npos);
+        body.replace(at, strlen(name), dir + "/" + name);
+    }
+    std::string scn = dir + "/scn.json";
+    FILE* f = fopen(scn.c_str(), "w");
+    REQUIRE(f != nullptr);
+    fputs(body.c_str(), f);
+    fclose(f);
+
+    setenv("ESPRITE_QEMU_IMAGE", img.c_str(), 1);
+    static std::string kept;
+    kept = scn;
+    int rc = run_cli({"esprite", "scenario", kept.c_str()});
+    unsetenv("ESPRITE_QEMU_IMAGE");
+    REQUIRE(rc == 0);
+
+    for (const char* name : names) {
+        std::string got = slurp_file(dir + "/" + name);
+        std::string want = slurp_file(resolve_repo_file(std::string("tests/goldens/qemu/") + name));
+        REQUIRE_MESSAGE(!got.empty(), "scenario did not write ", name);
+        REQUIRE_MESSAGE(!want.empty(), "golden missing for ", name, " (run make qemu-goldens)");
+        CHECK_MESSAGE(got == want, name, " differs from its golden");
+    }
+}
+
 TEST_CASE("ESP32 arduino image boots and ticks") {
     std::string bin, img;
     if (!qemu_env(&bin, &img, "ESPRITE_QEMU_XTENSA", "arduino_esp32.bin")) {

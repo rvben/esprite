@@ -102,6 +102,21 @@ static void handle_line(char* line) {
     } else if (strcmp(cmd, "release") == 0) {
         s_touch_held = false;
         reply("ok");
+    } else if (strcmp(cmd, "tap") == 0) {
+        long x, y, ms;
+        if (!parse_int(strtok_r(NULL, " ", &save), 0, 4095, &x) ||
+            !parse_int(strtok_r(NULL, " ", &save), 0, 4095, &y) ||
+            !parse_int(strtok_r(NULL, " ", &save), 1, 10000, &ms)) {
+            reply("err tap needs <x> <y> <ms 1-10000>");
+            return;
+        }
+        s_touch_x = (int)x;
+        s_touch_y = (int)y;
+        s_touch_held = true;
+        s_touch_events++;
+        vTaskDelay(pdMS_TO_TICKS(ms));
+        s_touch_held = false;
+        reply("ok");
     } else {
         reply("err unknown command");
     }

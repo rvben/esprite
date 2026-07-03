@@ -18,6 +18,12 @@
 //                                        counts one button event)
 //   touch <x> <y>             -> "ok"   (press or drag-move)
 //   release                   -> "ok"
+//   tap <x> <y> <ms>          -> "ok"   (press held for ms guest-side, then
+//                                        released; replies after release.
+//                                        Live-state pollers - LVGL indev
+//                                        drivers - need the hold to observe
+//                                        the press; a host-paced press and
+//                                        release can fall between two polls)
 // Malformed input replies "err <reason>". The agent prints
 // "esprite-agent v1" once on start.
 #pragma once

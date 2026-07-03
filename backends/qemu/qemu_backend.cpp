@@ -276,11 +276,34 @@ struct QemuBackend : SimBackend {
 
     bool agent_touch(bool down, int x, int y, std::string* err) override {
         if (!ensure_agent(err)) return false;
+        // A pending frame blocks the guest's whole UI task (render AND input
+        // polling) until the host consumes it; consume before and after so
+        // the poller actually observes this state change.
+        pump_display();
         std::string reply;
-        if (down)
-            return agent_.request("touch " + std::to_string(x) + " " + std::to_string(y),
-                                  &reply, err);
-        return agent_.request("release", &reply, err);
+        bool ok = down ? agent_.request("touch " + std::to_string(x) + " " + std::to_string(y),
+                                        &reply, err)
+                       : agent_.request("release", &reply, err);
+        pump_display();
+        return ok;
+    }
+
+    bool agent_tap(int x, int y, int ms, std::string* err) override {
+        if (!ensure_agent(err)) return false;
+        pump_display();   // wake a flush-blocked UI task so it can see the press
+        std::string reply;
+        // The agent replies after the guest-side hold completes.
+        if (!agent_.request("tap " + std::to_string(x) + " " + std::to_string(y) +
+                            " " + std::to_string(ms), &reply, err, ms + 3000))
+            return false;
+        // Consume the press-state and release-state frames: each one blocks
+        // the UI task again, and the click only completes once the task has
+        // processed the release.
+        for (int i = 0; i < 8; i++) {
+            usleep(40000);
+            pump_display();
+        }
+        return true;
     }
 
     const char* name() const override { return "qemu"; }
@@ -288,6 +311,14 @@ struct QemuBackend : SimBackend {
     void set_interrupt_check(bool (*fn)()) { interrupted_ = fn; }
 
 private:
+    // Best-effort display consume for the input paths: failures (e.g. a
+    // display-less board) are irrelevant to input, they just mean no frame
+    // was pending.
+    void pump_display() {
+        std::string ignored;
+        sync_framebuffer(&ignored);
+    }
+
     // Connects the AgentLink on first use and proves the guest agent is
     // actually there with a ping: the chardev socket accepts regardless of
     // whether the firmware runs the agent, so only a reply distinguishes a
