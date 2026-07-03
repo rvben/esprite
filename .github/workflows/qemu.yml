@@ -16,10 +16,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The prebuilt Espressif QEMU links against system SDL2 and (for
-      # user-mode networking) libslirp, neither preinstalled on the runner.
+      # ldd-derived runtime libraries for the prebuilt emulator; the list and
+      # its re-derivation method live in the script.
       - name: Install emulator runtime libraries
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libsdl2-2.0-0 libslirp0 libpixman-1-0
+        run: bash tools/qemu/ci-deps.sh
 
       - name: Cache the prebuilt emulator
         uses: actions/cache@v4
