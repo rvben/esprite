@@ -90,9 +90,18 @@ std::vector<std::string> qemu_build_argv(const QemuSpec& spec) {
         spec.qemu_bin,
         "-machine", spec.machine,
         "-nographic",
+    };
+    if (!spec.agent_socket.empty()) {
+        // Explicit -serial flags replace -nographic's implicit slot-0
+        // assignment in order: keep the console on the stdio mux, then hand
+        // UART1 to the input-agent chardev.
+        argv.insert(argv.end(), {"-serial", "mon:stdio",
+                                 "-serial", "unix:" + spec.agent_socket + ",server=on,wait=off"});
+    }
+    argv.insert(argv.end(), {
         "-drive", "file=" + spec.flash_image + ",if=mtd,format=raw",
         "-qmp", "unix:" + spec.qmp_socket + ",server=on,wait=off",
-    };
+    });
     // Deliberately no "-monitor none": Task 2's spike found it intermittently
     // hangs this QEMU build, and Espressif's own pytest-embedded-qemu never
     // passes it either.

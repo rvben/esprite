@@ -26,6 +26,21 @@ TEST_CASE("qemu argv omits -icount when spec.icount is false") {
     CHECK(v == want);
 }
 
+TEST_CASE("qemu argv wires the agent chardev to UART1 and keeps the console on stdio") {
+    QemuSpec s{"/q/qemu-system-riscv32", "esp32c3", "/f/flash.bin", false, "/tmp/q.sock"};
+    s.agent_socket = "/tmp/agent.sock";
+    auto v = qemu_build_argv(s);
+    // Explicit -serial flags replace -nographic's implicit assignment in
+    // order: slot 0 must stay the stdio mux or the console goes dark.
+    std::vector<std::string> want = {
+        "/q/qemu-system-riscv32", "-machine", "esp32c3", "-nographic",
+        "-serial", "mon:stdio",
+        "-serial", "unix:/tmp/agent.sock,server=on,wait=off",
+        "-drive", "file=/f/flash.bin,if=mtd,format=raw",
+        "-qmp", "unix:/tmp/q.sock,server=on,wait=off"};
+    CHECK(v == want);
+}
+
 TEST_CASE("child lifecycle: spawn, capture stdout, orderly stop") {
     // Uses /bin/cat with spawn_only() (spawn without QMP connect) so the
     // process plumbing is tested without QEMU. echo via stdin -> stdout.

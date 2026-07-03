@@ -5,6 +5,7 @@
 #include "qemu_process.h"
 #include "screendump.h"
 #include "framebuffer.h"
+#include "agent_link.h"
 #include <ArduinoJson.h>
 #include <chrono>
 #include <cstdio>
@@ -114,6 +115,10 @@ struct QemuBackend : SimBackend {
         // execution; only verified for riscv32 so far, xtensa stays wall-clock.
         spec.icount = std::string(t->qemu->arch) == "riscv32";
         spec.qmp_socket = socket_dir_ + "/qmp.sock";
+        // Agent-capable boards get UART1 wired to a chardev; the AgentLink
+        // connects lazily on the first injection.
+        agent_capable_ = t->qemu->agent;
+        if (agent_capable_) spec.agent_socket = socket_dir_ + "/agent.sock";
         spec.interrupted = interrupted_;   // lets start()'s QMP retry loop bail early on SIGINT/SIGTERM
 
         if (!process_.start(spec, err)) { cleanup_dir(); return false; }
@@ -165,6 +170,8 @@ struct QemuBackend : SimBackend {
     }
 
     void shutdown() override {
+        agent_.close();
+        agent_capable_ = false;
         process_.stop();
         cleanup_dir();
     }
@@ -230,22 +237,72 @@ struct QemuBackend : SimBackend {
         return true;
     }
 
+    bool agent_available() override { return agent_capable_ && process_.running(); }
+
+    bool agent_gpio(int pin, int level, std::string* err) override {
+        if (!ensure_agent(err)) return false;
+        std::string reply;
+        return agent_.request("gpio " + std::to_string(pin) + " " + std::to_string(level),
+                              &reply, err);
+    }
+
+    bool agent_pulse(int pin, int level, int ms, std::string* err) override {
+        if (!ensure_agent(err)) return false;
+        std::string reply;
+        // The agent replies after the pulse completes guest-side; give the
+        // transport the pulse duration on top of the normal margin.
+        return agent_.request("pulse " + std::to_string(pin) + " " + std::to_string(level) +
+                              " " + std::to_string(ms), &reply, err, ms + 3000);
+    }
+
+    bool agent_touch(bool down, int x, int y, std::string* err) override {
+        if (!ensure_agent(err)) return false;
+        std::string reply;
+        if (down)
+            return agent_.request("touch " + std::to_string(x) + " " + std::to_string(y),
+                                  &reply, err);
+        return agent_.request("release", &reply, err);
+    }
+
     const char* name() const override { return "qemu"; }
 
     void set_interrupt_check(bool (*fn)()) { interrupted_ = fn; }
 
 private:
+    // Connects the AgentLink on first use and proves the guest agent is
+    // actually there with a ping: the chardev socket accepts regardless of
+    // whether the firmware runs the agent, so only a reply distinguishes a
+    // cooperating image from a plain one.
+    bool ensure_agent(std::string* err) {
+        if (!agent_capable_ || !process_.running()) {
+            set_err(err, "no input agent: target has none or qemu is not running");
+            return false;
+        }
+        if (agent_.connected()) return true;
+        if (!agent_.connect_unix(socket_dir_ + "/agent.sock", 2000, err)) return false;
+        std::string reply;
+        if (!agent_.request("ping", &reply, err, 5000)) {
+            agent_.close();
+            if (err) *err = "guest agent did not answer (does the firmware run esprite_qemu_agent?): " + *err;
+            return false;
+        }
+        return true;
+    }
+
     // Removes the mkdtemp scratch dir this boot created (its qmp socket, then
     // the directory itself). Idempotent: safe when nothing was ever created.
     void cleanup_dir() {
         if (socket_dir_.empty()) return;
         unlink((socket_dir_ + "/qmp.sock").c_str());
         unlink((socket_dir_ + "/screen.ppm").c_str());
+        unlink((socket_dir_ + "/agent.sock").c_str());
         rmdir(socket_dir_.c_str());
         socket_dir_.clear();
     }
 
     QemuProcess process_;
+    AgentLink agent_;
+    bool agent_capable_ = false;
     std::string socket_dir_;
     // Optional CLI-supplied signal-flag accessor; null when nothing wired one
     // up (e.g. a unit test that never calls the (interrupted) overload of

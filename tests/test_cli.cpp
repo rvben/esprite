@@ -268,10 +268,10 @@ TEST_CASE("non-tier-1 commands on a qemu target are unsupported before boot") {
     CHECK(run_cli_err({"esprite", "screenshot", "x.png", "--target", "qemu_esp32c3"}, &err) == 7);
     CHECK(err.find("\"kind\":\"unsupported\"") != std::string::npos);
 
-    // A nonexistent scenario file would normally be bad_args (file not found),
-    // but the qemu gate fires first since scenario is native-only.
-    CHECK(run_cli_err({"esprite", "scenario", "/nonexistent.json", "--target", "qemu_esp32c3"}, &err) == 7);
-    CHECK(err.find("\"kind\":\"unsupported\"") != std::string::npos);
+    // Scenarios run on qemu targets now (per-step gating inside the runner),
+    // so a missing file is a plain bad_args, exactly like a native target.
+    CHECK(run_cli_err({"esprite", "scenario", "/nonexistent.json", "--target", "qemu_esp32c3"}, &err) == 2);
+    CHECK(err.find("\"kind\":\"bad_args\"") != std::string::npos);
 
     CHECK(run_cli_err({"esprite", "serve", "--shot", "x.png", "--target", "qemu_esp32c3"}, &err) == 7);
     CHECK(err.find("\"kind\":\"unsupported\"") != std::string::npos);

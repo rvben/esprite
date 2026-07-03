@@ -20,6 +20,19 @@ TEST_CASE("SimTarget defaults to the native backend") {
     CHECK(t->qemu == nullptr);
 }
 
+TEST_CASE("native backend has no input agent") {
+    const SimTarget* t = sim_target("sample_gfx");
+    REQUIRE(t != nullptr);
+    sim_backend_select(t);
+    CHECK_FALSE(sim_backend().agent_available());
+    std::string err;
+    CHECK_FALSE(sim_backend().agent_gpio(9, 0, &err));
+    CHECK(err.find("agent") != std::string::npos);
+    err.clear();
+    CHECK_FALSE(sim_backend().agent_touch(true, 10, 10, &err));
+    CHECK(!err.empty());
+}
+
 TEST_CASE("qemu_esp32c3 declares BACKEND_QEMU with an esp32c3/riscv32 machine spec") {
     // Qemu targets are data-driven (targets/qemu/*.json): registered by
     // qemu_boards_install, which esprite_main normally calls. Direct

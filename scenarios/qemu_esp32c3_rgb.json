@@ -1,0 +1,12 @@
+{
+  "target": "qemu_esp32c3_rgb",
+  "steps": [
+    { "cmd": "pixel", "x": 80,  "y": 60,  "value": 63488, "timeout_ms": 30000 },
+    { "cmd": "screenshot", "out": "01-quadrants.png" },
+    { "cmd": "tap", "x": 160, "y": 120 },
+    { "cmd": "pixel", "x": 160, "y": 120, "value": 0, "timeout_ms": 10000 },
+    { "cmd": "button", "which": "BOOT" },
+    { "cmd": "pixel", "x": 80, "y": 60, "value": 2016, "timeout_ms": 10000 },
+    { "cmd": "screenshot", "out": "02-inverted.png" }
+  ]
+}

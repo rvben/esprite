@@ -47,11 +47,9 @@ static const unsigned SERIAL_SETTLE_QEMU_MS = 500;
 // Gives the active target time to react to a serial send/before a serial
 // expect. Native targets step their in-process loop(); a qemu target has no
 // loop() to step, so it settles through the backend's own wall-clock pump
-// instead (see SERIAL_SETTLE_QEMU_MS). Checked via sim_backend().name(), not
-// sim_active_target(): a qemu boot never calls core's sim_boot() (it manages
-// its own child process instead), so core's notion of the active target
-// stays stale/null for a qemu-only process - the backend seam is the only
-// reliable source for "which implementation is actually running".
+// instead (see SERIAL_SETTLE_QEMU_MS). Checked via sim_backend().name(): the
+// backend seam is authoritative for "which implementation is running", and
+// it works even for callers that never booted a target in this process.
 static void serial_settle(int native_steps) {
     if (std::string(sim_backend().name()) == "qemu")
         sim_backend().settle_ms(SERIAL_SETTLE_QEMU_MS);
@@ -114,23 +112,28 @@ static void install_signal_handlers() {
 // qemu target has, so it is gated to `unsupported` before boot - no QEMU
 // process is ever spawned for a command this returns false for.
 // Commands a qemu-backed target supports. Tier 1 (any flash image): serial,
-// logs, and session control. Tier 2 (board spec declares a display, firmware
-// drives esp_lcd_qemu_rgb): adds screenshot; serve's --shot/--window follow
-// the same display rule in the serve path itself. Everything else stays
-// unsupported until its milestone lands (input in M2, HTTP snapshot in M3).
+// logs, and session control. Tier 2 is firmware cooperation, declared per
+// board spec: a display (esp_lcd_qemu_rgb) adds screenshot, the input agent
+// (esprite_qemu_agent) adds tap/swipe/gpio/button; serve's --shot/--window
+// follow the display rule in the serve path itself. Everything else stays
+// unsupported until its milestone lands (HTTP snapshot in M3).
 static bool qemu_command_allowed(const std::string& cmd, const SimTarget* t) {
     if (cmd == "serial" || cmd == "logs" || cmd == "quit" || cmd == "exit") return true;
     bool has_display = t && t->board && t->board->width > 0 && t->board->height > 0;
+    bool has_agent   = t && t->qemu && t->qemu->agent;
     if (cmd == "screenshot") return has_display;
+    if (cmd == "tap" || cmd == "swipe" || cmd == "gpio" || cmd == "button") return has_agent;
     return false;
 }
 
 // The unsupported-command message names what is actually missing: a display
-// in the board spec for screenshot, the tier-1 restriction otherwise.
+// or the input agent in the board spec, the tier-1 restriction otherwise.
 static std::string qemu_unsupported_msg(const std::string& cmd, const std::string& key) {
-    return "'" + cmd + "' is not supported on qemu-backed target '" + key + "'" +
-           (cmd == "screenshot" ? " (its board spec declares no display)"
-                                : " (serial/logs only)");
+    const char* why = " (serial/logs only)";
+    if (cmd == "screenshot") why = " (its board spec declares no display)";
+    else if (cmd == "tap" || cmd == "swipe" || cmd == "gpio" || cmd == "button")
+        why = " (its board spec declares no input agent)";
+    return "'" + cmd + "' is not supported on qemu-backed target '" + key + "'" + why;
 }
 
 // Stamped by the build from the CMake project version: one source of truth
@@ -236,8 +239,8 @@ static const std::string kSchema = std::string(R"JSON({
         { "name": "ok", "description": "Delivered.", "type": "boolean" },
         { "name": "replies", "description": "For send: JSON lines the device sent back.", "type": "string" }
       ] },
-    { "name": "button", "description": "Press a physical button. pwr-long and pwr-release inject the power button's long-press and release edges for hold gestures (advance time with steps between them).", "mutating": true, "stability": "stable",
-      "args": [ { "name": "which", "description": "primary|secondary|pwr|pwr-long|pwr-release.", "type": "string", "required": true, "enum": ["primary", "secondary", "pwr", "pwr-long", "pwr-release"] } ],
+    { "name": "button", "description": "Press a physical button, by semantic name or by the board's silk-screen label (case-insensitive; see list-targets buttons). pwr-long and pwr-release inject the power button's long-press and release edges for hold gestures (advance time with steps between them). On agent-capable qemu targets a labeled GPIO button pulses its pin through the guest input agent.", "mutating": true, "stability": "stable",
+      "args": [ { "name": "which", "description": "primary|secondary|pwr|pwr-long|pwr-release or a board button label (e.g. BOOT).", "type": "string", "required": true } ],
       "example": { "args": ["primary", "--target", "waveshare_amoled_18"], "stdin": "" } },
     { "name": "serial", "description": "serial send TEXT feeds device input; serial expect REGEX matches captured output (exit 1 on no match).", "mutating": false, "stability": "stable",
       "args": [
@@ -248,7 +251,7 @@ static const std::string kSchema = std::string(R"JSON({
     { "name": "logs", "description": "Print captured device serial output.", "mutating": false, "stability": "stable",
       "example": { "args": ["--target", "waveshare_amoled_18"], "stdin": "" },
       "output_fields": [ { "name": "serial", "description": "Captured serial text.", "type": "string" } ] },
-    { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless.", "mutating": true, "stability": "stable",
+    { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless, on native and qemu targets. Steps: snapshot, screenshot, steps (native-only), settle {ms} (portable time), pixel {x,y,value,timeout_ms} (framebuffer assertion with a retry deadline; the emulator golden primitive), battery, button, tap, swipe, expect (native-only; use pixel/serial on qemu), rotate, motion, serial {expect,absent}, gpio, wifi, ble. Steps needing a capability the target lacks fail individually with unsupported.", "mutating": true, "stability": "stable",
       "args": [ { "name": "file", "description": "Scenario JSON path.", "type": "string", "required": true } ] },
     { "name": "serve", "description": "Boot and keep pumping so a live bridge can drive the device. HTTP: a bridge POSTs to the firmware's webserver (--port). BLE: --ble-port N exposes the virtual BLE link as newline-delimited JSON on a localhost TCP socket (connect = bonded central, lines in = host->device, device lines stream back; one client at a time). --window opens an interactive device-bezel window (mouse=touch, clickable board buttons with hover tooltips, ? for help, and a backtick-opened hardware panel with battery/USB/rotate controls on boards that have them). Human logs on stderr. On a qemu-backed target, serve boots and pumps serial I/O until interrupted; there is no HTTP webserver or native BLE link, so --ble-port is rejected as unsupported. When the qemu target's board spec declares a display, --shot and --window mirror the guest panel via QMP screendump (10 Hz for the window); on a display-less qemu target they are rejected as unsupported (see the backend field on list-targets).", "mutating": true, "stability": "stable" },
     { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), swipe (x1,y1,x2,y2), expect (text/absent/match), button, battery, rotate, motion, gpio, wifi, ble (sub+data/passkey), snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
@@ -260,11 +263,12 @@ static const std::string kSchema = std::string(R"JSON({
     { "kind": "ref_not_found", "description": "tap --ref referenced a widget not in the current ui snapshot.", "exit_code": 4 },
     { "kind": "conflict", "description": "An argument or option conflicts with another (e.g. tap given both --ref and x/y).", "exit_code": 5 },
     { "kind": "post_failed", "description": "snapshot could not be delivered to the running target (connect failed or body exceeds the server read size).", "exit_code": 6 },
-    { "kind": "unsupported", "description": "The command targets a capability the active board lacks (e.g. battery/rotate on a board without it, or a button the board does not have), or a command outside a qemu target's tier (tier 1: serial/logs/serve; screenshot and serve --shot/--window additionally need a display in the board spec).", "exit_code": 7 },
+    { "kind": "unsupported", "description": "The command targets a capability the active board lacks (e.g. battery/rotate on a board without it, or a button the board does not have), or a command outside a qemu target's tier (tier 1: serial/logs/serve; screenshot and serve --shot/--window need a display in the board spec; tap/swipe/gpio/button need \"agent\": true).", "exit_code": 7 },
     { "kind": "bad_args", "description": "Missing or invalid arguments for the command.", "exit_code": 2 },
     { "kind": "expect_failed", "description": "A scenario/run 'expect' assertion did not hold (text present/absent mismatch).", "exit_code": 8 },
     { "kind": "backend_unavailable", "description": "A qemu-backed target could not boot: no qemu-system-<arch> binary configured (set ESPRITE_QEMU_BIN, or ESPRITE_QEMU_RISCV32/ESPRITE_QEMU_XTENSA per the target's architecture), ESPRITE_QEMU_IMAGE unset or not found (the flash image path), or the child process failed to spawn or never reached a running QMP state. Also covers 'serial send' failing against a qemu-backed target whose child has exited or closed its stdin pipe.", "exit_code": 2 },
-    { "kind": "capture_failed", "description": "A display capture failed after boot: the qemu screendump command errored, wrote no file, or produced an undecodable image. The framebuffer keeps its previous content.", "exit_code": 9 }
+    { "kind": "capture_failed", "description": "A display capture failed after boot: the qemu screendump command errored, wrote no file, or produced an undecodable image. The framebuffer keeps its previous content.", "exit_code": 9 },
+    { "kind": "agent_failed", "description": "The qemu input agent did not accept an injection: the firmware image does not run the esprite_qemu_agent component, the agent did not answer in time, or it rejected the command.", "exit_code": 10 }
   ]
 })JSON";
 
@@ -492,12 +496,9 @@ int esprite_main(int argc, char** argv) {
         if (file.empty()) return fail("bad_args", "scenario needs a file path", 2);
         std::string def = resolve_target(argc, argv);
         std::string effective = def.empty() ? "waveshare_amoled_18" : def;
-        // scenario_run stays native-only (it drives the in-process
-        // framebuffer/widget tree); gate before ever opening the file, so no
-        // QEMU process is spawned for a target this can never support.
-        if (const SimTarget* target = sim_target(effective))
-            if (target->backend == BACKEND_QEMU)
-                return fail("unsupported", "scenario is native-only; '" + effective + "' boots via qemu", 7);
+        // scenario_run boots through the backend seam and gates per step, so
+        // qemu targets run scenarios too (steps needing the native surface
+        // fail with unsupported individually).
         return scenario_run(file, effective);
     }
 

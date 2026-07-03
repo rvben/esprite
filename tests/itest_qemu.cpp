@@ -176,10 +176,10 @@ TEST_CASE("C3 rgb fixture: screendump captures the quadrant pattern") {
     while ((n = fread(buf, 1, sizeof(buf), f)) > 0) ppm.append(buf, n);
     fclose(f);
     unlink(dump.c_str());
-    // The dump also released the guest: the ready marker follows it.
-    out = pump_until(p, "rgb_demo ready", 15000);
+    // The dump also released the guest: the post-draw state marker follows.
+    out = pump_until(p, "rgb_demo state touch=0 inv=0", 15000);
     p.stop();
-    CHECK_MESSAGE(out.find("rgb_demo ready") != std::string::npos,
+    CHECK_MESSAGE(out.find("rgb_demo state touch=0 inv=0") != std::string::npos,
                    "screendump did not release the guest; last 300 chars: ", tail(out));
     int w = 0, h = 0;
     std::vector<uint16_t> px;
@@ -223,6 +223,103 @@ TEST_CASE("CLI run session: screenshot on qemu_esp32c3_rgb lands guest pixels in
     CHECK_MESSAGE(greenish(fb.pixel(240, 60)), "TR not green: ", fb.pixel(240, 60));
     CHECK_MESSAGE(blueish(fb.pixel(80, 180)),  "BL not blue: ",  fb.pixel(80, 180));
     CHECK_MESSAGE(whitish(fb.pixel(240, 180)), "BR not white: ", fb.pixel(240, 180));
+}
+
+#include "agent_link.h"
+#include <fstream>
+#include <sstream>
+
+namespace {
+
+// Reads a whole file; empty string when missing (asserted by callers).
+std::string slurp_file(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return "";
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+}
+
+// The committed scenario next to the repo's other scenarios, resolved from
+// the ctest build-dir cwd exactly like the fixtures.
+std::string resolve_repo_file(const std::string& rel) {
+    for (const char* prefix : {"../", ""}) {
+        std::string p = std::string(prefix) + rel;
+        if (access(p.c_str(), R_OK) == 0) return p;
+    }
+    return "";
+}
+
+}  // namespace
+
+TEST_CASE("agent transport: ping, gpio, and protocol errors over the second chardev") {
+    std::string bin, img;
+    if (!qemu_env(&bin, &img, "ESPRITE_QEMU_RISCV32", "rgb_c3.bin")) {
+        MESSAGE("skipped: QEMU env/fixtures missing (ESPRITE_QEMU_RISCV32 / rgb_c3.bin)");
+        return;
+    }
+    QemuProcess p;
+    std::string err;
+    std::string sock = tmp_sock_path();
+    std::string agent_sock = sock.substr(0, sock.rfind('/')) + "/agent.sock";
+    QemuSpec s{bin, "esp32c3", img, true, sock};
+    s.agent_socket = agent_sock;
+    REQUIRE_MESSAGE(p.start(s, &err), err);
+    std::string out = pump_until(p, "rgb_demo drawing", 60000);
+    REQUIRE_MESSAGE(out.find("rgb_demo drawing") != std::string::npos,
+                     "fixture never started; last 300 chars: ", tail(out));
+    AgentLink link;
+    REQUIRE_MESSAGE(link.connect_unix(agent_sock, 2000, &err), err);
+    std::string reply;
+    CHECK_MESSAGE(link.request("ping", &reply, &err), err);
+    CHECK(reply == "ok esprite-agent v1");
+    CHECK(link.request("gpio 9 0", &reply, &err));
+    CHECK_FALSE(link.request("bogus 1 2", &reply, &err));
+    CHECK(err.find("unknown command") != std::string::npos);
+    link.close();
+    p.stop();
+}
+
+TEST_CASE("CLI scenario: tap and button drive the guest, goldens match byte-exact") {
+    std::string bin, img;
+    if (!qemu_env(&bin, &img, "ESPRITE_QEMU_RISCV32", "rgb_c3.bin")) {
+        MESSAGE("skipped: QEMU env/fixtures missing (ESPRITE_QEMU_RISCV32 / rgb_c3.bin)");
+        return;
+    }
+    std::string scn_src = resolve_repo_file("scenarios/qemu_esp32c3_rgb.json");
+    REQUIRE_MESSAGE(!scn_src.empty(), "scenarios/qemu_esp32c3_rgb.json not found");
+    std::string dir = "/tmp/esprite_itest_qemu_scn";
+    system(("rm -rf " + dir + " && mkdir -p " + dir).c_str());
+    // Same steps as the committed scenario, with the relative screenshot
+    // outputs redirected to the scratch dir (ctest's cwd is the build dir).
+    std::string body = slurp_file(scn_src);
+    for (const char* name : {"01-quadrants.png", "02-inverted.png"}) {
+        size_t at = body.find(name);
+        REQUIRE(at != std::string::npos);
+        body.replace(at, strlen(name), dir + "/" + name);
+    }
+    std::string scn = dir + "/scn.json";
+    FILE* f = fopen(scn.c_str(), "w");
+    REQUIRE(f != nullptr);
+    fputs(body.c_str(), f);
+    fclose(f);
+
+    setenv("ESPRITE_QEMU_IMAGE", img.c_str(), 1);
+    static std::string kept;   // outlives run_cli's argv
+    kept = scn;
+    int rc = run_cli({"esprite", "scenario", kept.c_str()});
+    unsetenv("ESPRITE_QEMU_IMAGE");
+    REQUIRE(rc == 0);
+
+    // Byte-exact goldens: the fixture's states are flat colors and the PNG
+    // encoder is deterministic, so any pixel drift is a real regression.
+    for (const char* name : {"01-quadrants.png", "02-inverted.png"}) {
+        std::string got = slurp_file(dir + "/" + name);
+        std::string want = slurp_file(resolve_repo_file(std::string("tests/goldens/qemu/") + name));
+        REQUIRE_MESSAGE(!got.empty(), "scenario did not write ", name);
+        REQUIRE_MESSAGE(!want.empty(), "golden missing for ", name, " (run make qemu-goldens)");
+        CHECK_MESSAGE(got == want, name, " differs from its golden");
+    }
 }
 
 TEST_CASE("ESP32 arduino image boots and ticks") {

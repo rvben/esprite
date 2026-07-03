@@ -3,10 +3,14 @@
 #include "actions.h"
 #include "runtime.h"
 #include "target.h"
+#include "backend.h"
 #include "screenshot.h"
+#include "framebuffer.h"
 #include "sim_input.h"
 #include "WebServer.h"
 #include <ArduinoJson.h>
+#include <chrono>
+#include <thread>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
@@ -80,8 +84,17 @@ int scenario_run(const std::string& path, const std::string& default_target) {
         return fail("bad_args", "scenario: " + path + " is not valid JSON", 2);
 
     std::string target = doc["target"] | default_target.c_str();
-    if (!sim_boot(target)) return fail("unknown_target", "unknown target '" + target + "'", 2);
-    sim_run_steps(60);
+    const SimTarget* t = sim_target(target);
+    if (!t) return fail("unknown_target", "unknown target '" + target + "'", 2);
+    // Boot through the backend seam: native wraps sim_boot plus its warmup
+    // steps (the historical behavior), qemu boots the child process. Steps
+    // that assume the in-process surface gate themselves per backend below.
+    sim_backend_select(t);
+    std::string boot_err;
+    if (!sim_backend().boot(t, &boot_err))
+        return fail("backend_unavailable",
+                    boot_err.empty() ? ("could not boot '" + target + "'") : boot_err, 2);
+    bool is_qemu = t->backend == BACKEND_QEMU;
 
     // Run every step; remember the first failure and report it as the result,
     // with the same kind/message envelope and exit codes as the other dialects.
@@ -103,10 +116,65 @@ int scenario_run(const std::string& path, const std::string& default_target) {
             else
                 sim_settle_ms();   // let the firmware render the injected data
         } else if (!strcmp(cmd, "screenshot")) {
-            sim_settle_ms();       // capture a settled frame, whatever ran before
-            sim_screenshot_png(step["out"] | "esprite.png");
+            if (!is_qemu) sim_settle_ms();   // capture a settled frame, whatever ran before
+            // Sync-then-capture, one code path for both backends (native
+            // sync is a successful no-op).
+            std::string sync_err;
+            if (!sim_backend().sync_framebuffer(&sync_err))
+                step_failed("capture_failed", "could not capture the display: " + sync_err);
+            else
+                sim_screenshot_png(step["out"] | "esprite.png");
         } else if (!strcmp(cmd, "steps")) {
-            sim_run_steps(step["n"] | 10);
+            if (is_qemu) step_failed("unsupported", "steps is native-only (loop iterations); use settle");
+            else sim_run_steps(step["n"] | 10);
+        } else if (!strcmp(cmd, "settle")) {
+            // The portable time verb: native pumps loop() wall-bounded, qemu
+            // pumps the child's I/O for real wall-clock time.
+            int ms = step["ms"] | 0;
+            if (ms < 1 || ms > 60000)
+                step_failed("bad_args", "settle needs ms in 1..60000");
+            else
+                sim_backend().settle_ms((unsigned)ms);
+        } else if (!strcmp(cmd, "pixel")) {
+            // Framebuffer assertion with a retry deadline: eventually
+            // consistent by design, since a qemu guest redraws in wall time
+            // and each sync also releases its next pending frame. Exact
+            // matches suit flat-color fixtures; this is the emulator golden
+            // primitive.
+            int x = step["x"] | -1, y = step["y"] | -1;
+            long want = step["value"] | -1L;
+            int timeout_ms = step["timeout_ms"] | 5000;
+            if (x < 0 || y < 0 || want < 0 || want > 0xFFFF || timeout_ms < 1 || timeout_ms > 120000) {
+                step_failed("bad_args", "pixel needs x, y, value 0..65535, and optional timeout_ms 1..120000");
+            } else {
+                auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+                uint16_t got = 0;
+                bool matched = false, oob = false;
+                for (;;) {
+                    std::string sync_err;
+                    sim_backend().sync_framebuffer(&sync_err);   // transient failures just retry
+                    Framebuffer& fb = sim_framebuffer();
+                    if (x >= fb.w() || y >= fb.h()) { oob = true; }
+                    else {
+                        oob = false;
+                        got = fb.pixel(x, y);
+                        if (got == (uint16_t)want) { matched = true; break; }
+                    }
+                    if (std::chrono::steady_clock::now() >= deadline) break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    if (!is_qemu) sim_settle_ms();   // let native frames advance between polls
+                }
+                char buf[128];
+                if (oob) {
+                    snprintf(buf, sizeof(buf), "pixel (%d,%d) is outside the %dx%d framebuffer",
+                             x, y, sim_framebuffer().w(), sim_framebuffer().h());
+                    step_failed("bad_args", buf);
+                } else if (!matched) {
+                    snprintf(buf, sizeof(buf), "pixel (%d,%d) = 0x%04X, expected 0x%04X",
+                             x, y, got, (unsigned)want);
+                    step_failed("expect_failed", buf);
+                }
+            }
         } else if (!strcmp(cmd, "battery")) {
             bool charging = step["charging"] | false;
             if (ActionError e = apply_battery(step["pct"] | 75,
@@ -121,7 +189,9 @@ int scenario_run(const std::string& path, const std::string& default_target) {
                 step_failed(e.kind, e.msg);
         } else if (!strcmp(cmd, "expect")) {
             const char* m = step["match"] | "exact";
-            if (strcmp(m, "exact") != 0 && strcmp(m, "contains") != 0)
+            if (is_qemu)
+                step_failed("unsupported", "expect reads the native widget tree; use pixel or serial on qemu targets");
+            else if (strcmp(m, "exact") != 0 && strcmp(m, "contains") != 0)
                 step_failed("bad_args", "expect match must be 'exact' or 'contains'");
             else if (ActionError e = apply_expect(step["text"] | "", step["absent"] | "", !strcmp(m, "exact")))
                 step_failed(e.kind, e.msg);

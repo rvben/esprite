@@ -69,6 +69,61 @@ TEST_CASE("qemu_board_register rejects a duplicate key") {
     CHECK(err.find("duplicate") != std::string::npos);
 }
 
+TEST_CASE("qemu_board_parse reads the agent flag and buttons") {
+    QemuBoardSpec s;
+    std::string err;
+    REQUIRE_MESSAGE(qemu_board_parse(R"json({
+        "key": "k", "description": "d", "machine": "esp32c3", "arch": "riscv32",
+        "agent": true,
+        "buttons": [
+            {"label": "BOOT", "gpio": 9, "key": "b", "edge": "left", "pos": 0.5},
+            {"label": "USER", "gpio": 10, "active_low": false}
+        ]
+    })json", &s, &err), err);
+    CHECK(s.agent);
+    REQUIRE(s.buttons.size() == 2);
+    CHECK(s.buttons[0].label == "BOOT");
+    CHECK(s.buttons[0].gpio == 9);
+    CHECK(s.buttons[0].key == "b");
+    CHECK(s.buttons[0].edge == "left");
+    CHECK(s.buttons[0].active_low);          // default true
+    CHECK_FALSE(s.buttons[1].active_low);
+}
+
+TEST_CASE("qemu_board_parse rejects bad agent/button specs") {
+    QemuBoardSpec s;
+    std::string err;
+    // Buttons without the agent cannot be pressed; reject the combination.
+    CHECK_FALSE(qemu_board_parse(R"json({"key":"k","description":"d","machine":"m","arch":"riscv32",
+        "buttons":[{"label":"B","gpio":9}]})json", &s, &err));
+    CHECK(err.find("agent") != std::string::npos);
+    CHECK_FALSE(qemu_board_parse(R"json({"key":"k","description":"d","machine":"m","arch":"riscv32",
+        "agent":true,"buttons":[{"label":"","gpio":9}]})json", &s, &err));            // empty label
+    CHECK_FALSE(qemu_board_parse(R"json({"key":"k","description":"d","machine":"m","arch":"riscv32",
+        "agent":true,"buttons":[{"label":"B","gpio":64}]})json", &s, &err));          // pin range
+    CHECK_FALSE(qemu_board_parse(R"json({"key":"k","description":"d","machine":"m","arch":"riscv32",
+        "agent":true,"buttons":[{"label":"B","gpio":9,"edge":"diagonal"}]})json", &s, &err));  // edge
+}
+
+TEST_CASE("qemu_board_register materializes agent buttons as board SimButtons") {
+    QemuBoardSpec s;
+    std::string err;
+    REQUIRE(qemu_board_parse(R"json({
+        "key": "test_qemu_board_btn", "description": "d", "machine": "esp32c3",
+        "arch": "riscv32", "agent": true,
+        "buttons": [{"label": "BOOT", "gpio": 9, "key": "b"}]
+    })json", &s, &err));
+    const SimTarget* t = qemu_board_register(s, &err);
+    REQUIRE_MESSAGE(t != nullptr, err);
+    CHECK(t->qemu->agent);
+    REQUIRE(t->board->button_count == 1);
+    CHECK(std::string(t->board->buttons[0].label) == "BOOT");
+    CHECK(t->board->buttons[0].action == ACT_GPIO);
+    CHECK(t->board->buttons[0].gpio == 9);
+    CHECK(t->board->buttons[0].key == 'b');
+    CHECK(t->board->buttons[0].active_low);
+}
+
 TEST_CASE("ESPRITE_QEMU_BOARD registers a user board file") {
     std::string dir = "/tmp/esprite_test_qemu_board";
     system(("rm -rf " + dir + " && mkdir -p " + dir).c_str());

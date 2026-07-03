@@ -1,16 +1,26 @@
 #include "actions.h"
 #include "runtime.h"
+#include "backend.h"
 #include "sim_input.h"
 #include "sim_ble.h"
 #include "lvgl_snapshot.h"
 #include "Arduino.h"
 #include "WiFi.h"
 #include "Print.h"
+#include <strings.h>
 
-// Matches serial_settle()'s native-steps branch in cli.cpp for the "serial
-// expect" command; the scenario runner has no qemu backend to consider, so
-// there is only the one (native) case here.
+// True when injection must route through the qemu guest agent instead of the
+// in-process input bus (the booted target runs in a child QEMU process).
+static bool qemu_agent_active() {
+    const SimTarget* t = sim_active_target();
+    return t && t->backend == BACKEND_QEMU;
+}
+
+// Matches cli.cpp's serial_settle for the "serial expect" command: native
+// targets step their loop, a qemu target pumps its child for wall-clock time
+// (it has no in-process loop to step).
 static const int SERIAL_SETTLE_STEPS = 60;
+static const unsigned SERIAL_SETTLE_QEMU_MS = 500;
 
 const BoardDesc* active_board() {
     const SimTarget* t = sim_active_target();
@@ -25,6 +35,15 @@ bool board_has_action(SimInputAction act) {
     return false;
 }
 
+// A board button whose label matches `which` case-insensitively, or null.
+static const SimButton* find_button_by_label(const std::string& which) {
+    const BoardDesc* b = active_board();
+    if (!b) return nullptr;
+    for (int i = 0; i < b->button_count; ++i)
+        if (strcasecmp(b->buttons[i].label, which.c_str()) == 0) return &b->buttons[i];
+    return nullptr;
+}
+
 ActionError apply_button(const std::string& which) {
     // The PWR control has three injectable edges, matching the power HAL:
     // press (1), long-press (2), and release (3). Long-press + release drive
@@ -32,8 +51,37 @@ ActionError apply_button(const std::string& which) {
     int pwr_event = (which == "pwr")         ? 1
                   : (which == "pwr-long")    ? 2
                   : (which == "pwr-release") ? 3 : 0;
-    if (pwr_event == 0 && which != "primary" && which != "secondary")
-        return {"bad_args", "button takes primary|secondary|pwr|pwr-long|pwr-release"};
+    bool semantic = pwr_event || which == "primary" || which == "secondary";
+
+    // A board button addressed by its silk-screen label works on every
+    // backend: qemu boards declare ACT_GPIO buttons pulsed via the guest
+    // agent, native ones map to whatever action the button declares.
+    if (!semantic) {
+        const SimButton* btn = find_button_by_label(which);
+        if (!btn)
+            return {"bad_args", "button takes primary|secondary|pwr|pwr-long|pwr-release or a board button label"};
+        if (btn->action == ACT_GPIO) {
+            int pressed = btn->active_low ? 0 : 1;
+            if (qemu_agent_active()) {
+                std::string err;
+                if (!sim_backend().agent_pulse(btn->gpio, pressed, 120, &err))
+                    return {"agent_failed", err};
+                return {};
+            }
+            sim_gpio_set(btn->gpio, pressed);  sim_run_steps(5);
+            sim_gpio_set(btn->gpio, !pressed); sim_run_steps(3);
+            return {};
+        }
+        // Native semantic actions addressed by label fall through to the
+        // same injection the semantic names use.
+        pwr_event = (btn->action == ACT_PWR) ? 1 : 0;
+        if (pwr_event) { sim_input().pwr_events.push_back(1); sim_run_steps(5); return {}; }
+        int idx = (btn->action == ACT_SECONDARY) ? 1 : 0;
+        sim_input().button[idx] = true;  sim_run_steps(5);
+        sim_input().button[idx] = false; sim_run_steps(3);
+        return {};
+    }
+
     SimInputAction act = pwr_event              ? ACT_PWR
                        : (which == "secondary") ? ACT_SECONDARY
                                                 : ACT_PRIMARY;
@@ -83,10 +131,14 @@ ActionError apply_serial_expect(const char* text, const char* absent) {
         return {"bad_args", std::string("invalid regex '") + text + "'"};
     if (absent && *absent && !sim_serial_regex_valid(absent))
         return {"bad_args", std::string("invalid regex '") + absent + "'"};
-    sim_run_steps(SERIAL_SETTLE_STEPS);
-    if (text && *text && !sim_serial_contains(text))
+    if (qemu_agent_active()) sim_backend().settle_ms(SERIAL_SETTLE_QEMU_MS);
+    else sim_run_steps(SERIAL_SETTLE_STEPS);
+    // The backend's serial capture, not the native shim directly, so the
+    // same assertion works against a qemu child's output.
+    std::string out = sim_backend().serial_output();
+    if (text && *text && !sim_serial_regex_search(out, text))
         return {"expect_failed", std::string("serial output does not match '") + text + "'"};
-    if (absent && *absent && sim_serial_contains(absent))
+    if (absent && *absent && sim_serial_regex_search(out, absent))
         return {"expect_failed", std::string("serial output unexpectedly matches '") + absent + "'"};
     return {};
 }
@@ -96,6 +148,12 @@ ActionError apply_tap(int x, int y) {
     if (!b || x < 0 || y < 0 || x >= b->width || y >= b->height)
         return {"bad_args", "tap needs x 0-" + std::to_string(b ? b->width - 1 : 0) +
                             " and y 0-" + std::to_string(b ? b->height - 1 : 0)};
+    if (qemu_agent_active()) {
+        std::string err;
+        if (!sim_backend().agent_touch(true, x, y, &err)) return {"agent_failed", err};
+        if (!sim_backend().agent_touch(false, x, y, &err)) return {"agent_failed", err};
+        return {};
+    }
     sim_input().touch_pressed = true;
     sim_input().touch_x = x;
     sim_input().touch_y = y;
@@ -112,6 +170,18 @@ ActionError apply_swipe(int x1, int y1, int x2, int y2) {
         return {"bad_args", "swipe needs x1 y1 x2 y2 within 0-" +
                             std::to_string(b ? b->width - 1 : 0) + " / 0-" +
                             std::to_string(b ? b->height - 1 : 0)};
+    if (qemu_agent_active()) {
+        // Same waypoints as the native gesture; the guest firmware's own
+        // input poll rate decides how it reads the moving press.
+        std::string err;
+        for (int i = 0; i <= 5; i++) {
+            int x = x1 + (x2 - x1) * i / 5;
+            int y = y1 + (y2 - y1) * i / 5;
+            if (!sim_backend().agent_touch(true, x, y, &err)) return {"agent_failed", err};
+        }
+        if (!sim_backend().agent_touch(false, x2, y2, &err)) return {"agent_failed", err};
+        return {};
+    }
     // A moving press across >=8 steps/point (>33ms indev read at 5ms/step) with
     // large per-read deltas, so LVGL registers a gesture rather than a tap.
     sim_input().touch_pressed = true;
@@ -136,6 +206,11 @@ ActionError apply_expect(const char* text, const char* absent, bool exact) {
 ActionError apply_gpio(int pin, int level) {
     if (pin < 0 || pin > 63 || (level != 0 && level != 1))
         return {"bad_args", "gpio needs a pin 0-63 and a level 0|1"};
+    if (qemu_agent_active()) {
+        std::string err;
+        if (!sim_backend().agent_gpio(pin, level, &err)) return {"agent_failed", err};
+        return {};
+    }
     sim_gpio_set(pin, level);
     sim_run_steps(5);
     return {};

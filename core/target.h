@@ -23,6 +23,9 @@ struct SimButton {
     // (which only lists the four fields above) keeps compiling unchanged.
     SimEdge        edge = EDGE_RIGHT;  // which device edge holds the control
     float          pos  = -1.0f;       // 0..1 along that edge; -1 = auto-stack
+    // ACT_GPIO press polarity: true = pressing drives the pin low (the common
+    // pullup wiring). Read by the button appliers when pulsing the pin.
+    bool           active_low = false;
 };
 
 // A simulated board's runtime description, read by framebuffer sizing, the CLI,
@@ -48,6 +51,10 @@ enum SimBackendKind { BACKEND_NATIVE = 0, BACKEND_QEMU };
 struct QemuMachineSpec {
     const char* machine;   // e.g. "esp32c3"
     const char* arch;      // e.g. "riscv32"
+    // Tier-2 input: the firmware carries the esprite_qemu_agent component on
+    // UART1, so the backend opens the agent chardev and the input commands
+    // (tap/swipe/gpio/button) route through it.
+    bool        agent = false;
 };
 
 // A registered target: an onboarded app the sim can boot. setup()/loop() are the

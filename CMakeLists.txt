@@ -234,6 +234,7 @@ add_library(qemu_backend STATIC
     backends/qemu/qemu_backend.cpp
     backends/qemu/screendump.cpp
     backends/qemu/qemu_board.cpp
+    backends/qemu/agent_link.cpp
     ${_qemu_boards_gen}
 )
 target_include_directories(qemu_backend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/backends/qemu)
@@ -290,6 +291,8 @@ add_executable(sim_tests
     tests/test_qemu_screendump.cpp
     tests/test_qemu_board.cpp
     tests/test_qemu_display_gating.cpp
+    tests/test_agent_link.cpp
+    tests/test_scenario_steps.cpp
 )
 target_link_libraries(sim_tests PRIVATE cli_lib)
 link_sim_targets(sim_tests)
