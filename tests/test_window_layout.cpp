@@ -5,10 +5,10 @@
 
 namespace {
 
-// Mirrors agentgauge's real button declaration (three explicit EDGE_RIGHT
-// positions) without depending on the agentgauge target existing - the brief
-// asks for a local fixture so this test runs the same whether or not the
-// agentgauge firmware checkout is present.
+// Mirrors the waveshare_amoled_18 board's real button declaration (three
+// explicit EDGE_RIGHT positions) without depending on that target existing -
+// the brief asks for a local fixture so this test runs the same whether or
+// not the agentgauge firmware checkout is present.
 const SimButton kThreeRight[] = {
     {"PRIMARY",   ACT_PRIMARY,   0, ' ',  EDGE_RIGHT, 0.30f},
     {"PWR",       ACT_PWR,       0, 'p',  EDGE_RIGHT, 0.50f},

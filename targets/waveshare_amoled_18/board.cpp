@@ -1,11 +1,11 @@
 #include "target.h"
 
-// The agentgauge board: a 480x480 AMOLED panel (QSPI CO5300) with two GPIO
-// side buttons (PRIMARY screen-cycle, SECONDARY brightness-cycle) plus the
-// AXP2101 PWR button. Boots the shared agentgauge firmware (agentgauge_fw);
-// this file only describes the hardware. The firmware's entry points are
-// renamed at compile time (setup->agentgauge_setup) so it coexists with other
-// firmwares (e.g. sample_gfx) in one binary.
+// Waveshare ESP32-S3-Touch-AMOLED-1.8: a 480x480 AMOLED panel (QSPI CO5300)
+// with two GPIO side buttons (PRIMARY screen-cycle, SECONDARY brightness-cycle)
+// plus the AXP2101 PWR button. Boots the shared agentgauge firmware
+// (agentgauge_fw); this file only describes the hardware. The firmware's entry
+// points are renamed at compile time (setup->agentgauge_setup) so it coexists
+// with other firmwares (e.g. sample_gfx) in one binary.
 void agentgauge_setup();
 void agentgauge_loop();
 
@@ -16,14 +16,14 @@ static const SimButton kButtons[] = {
 };
 
 static const BoardDesc kBoard = {
-    "agentgauge", 480, 480,
+    "Waveshare ESP32-S3-Touch-AMOLED-1.8", 480, 480,
     false, true, true,           // has_rotation, has_battery, has_imu
     kButtons, 3,
 };
 
 static const SimTarget kTarget = {
-    "agentgauge",
-    "agentgauge Wi-Fi Claude usage gauge (480x480 AMOLED)",
+    "waveshare_amoled_18",
+    "Waveshare ESP32-S3-Touch-AMOLED-1.8 (480x480) running the agentgauge firmware",
     agentgauge_setup,
     agentgauge_loop,
     &kBoard,

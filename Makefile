@@ -1,7 +1,7 @@
 BUILD   ?= build
 RELEASE ?= build-release
 PREFIX  ?= /usr/local
-TARGET  ?= agentgauge
+TARGET  ?= waveshare_amoled_18
 
 # Optional path to the agentgauge firmware source; the CMake default is the
 # ../agentgauge sibling checkout's firmware/src. agentgauge's own Makefile

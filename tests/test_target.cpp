@@ -33,8 +33,8 @@ TEST_CASE("SimButton defaults edge and pos when aggregate-initialized with 4 fie
     CHECK(kBtn.pos == -1.0f);
 }
 
-TEST_CASE("agentgauge buttons declare explicit ascending pos on EDGE_RIGHT") {
-    const SimTarget* t = sim_target("agentgauge");
+TEST_CASE("waveshare_amoled_18 buttons declare explicit ascending pos on EDGE_RIGHT") {
+    const SimTarget* t = sim_target("waveshare_amoled_18");
     if (!t) {
         MESSAGE("skipped: agentgauge firmware not present");
         return;

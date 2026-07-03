@@ -16,7 +16,8 @@ It is a reusable tool, not tied to any one app. A **firmware** is compiled once
 and is board-agnostic (it renders itself from `board_caps()` at runtime); a
 **board** target selects the panel it runs on. The first onboarded firmware is
 agentgauge, a Wi-Fi Claude usage-limit desk gauge, shown here on its Waveshare
-480x480 AMOLED board (`agentgauge`). Three more targets show the breadth, all
+ESP32-S3-Touch-AMOLED-1.8 board (`waveshare_amoled_18`, 480x480). Three more
+targets show the breadth, all
 with zero app-specific sim code: `sample_gfx` (a generic Arduino_GFX sketch),
 and two takes on the Cheap Yellow Display (ESP32-2432S028R, 320x240) - `cyd`,
 an Arduino_GFX touch-paint demo, and `cyd_tft`, a touch-button UI written
@@ -39,7 +40,7 @@ Requirements: CMake >= 3.20 and a C++17 compiler (Apple clang or gcc/clang on
 Linux). LVGL and ArduinoJson are fetched automatically; doctest and stb are
 vendored.
 
-The `agentgauge` target runs the agentgauge firmware, which lives in a separate
+The `waveshare_amoled_18` target runs the agentgauge firmware, which lives in a separate
 checkout: without it the build skips the target (with a CMake warning) and
 everything else works. Point `-DAGENTGAUGE_SRC=/path/to/firmware/src` (or
 `make build AGENTGAUGE_SRC=...`) at it to enable it. Prebuilt release
@@ -47,14 +48,14 @@ binaries carry the generic targets only, for the same reason.
 
 ## Screenshots
 
-The agentgauge target boots the real firmware, so injecting a limits snapshot
+The `waveshare_amoled_18` target boots the real agentgauge firmware, so injecting a limits snapshot
 drives the genuine data path (HTTP POST to the on-device server, parsed by the
 firmware's own handler) and the real UI updates:
 
 ```bash
 ./build/esprite snapshot \
   '{"lim":1,"s5":42,"s5r":180,"s7":10,"s7r":6000}' \
-  --target agentgauge --shot limits.png
+  --target waveshare_amoled_18 --shot limits.png
 ```
 
 ## Live window
@@ -62,7 +63,7 @@ firmware's own handler) and the real UI updates:
 For an interactive, iOS-Simulator-style view, run `serve` with `--window`:
 
 ```bash
-esprite serve --target agentgauge --port 8080 --window
+esprite serve --target waveshare_amoled_18 --port 8080 --window
 ```
 
 This opens a native SDL2 window: the device screen, pixel-exact, inside a slim
@@ -72,7 +73,7 @@ them); hover a nub for its label and keyboard shortcut, press `?` for the
 full key list, and press `` ` `` (backtick) for the hardware-controls panel
 (battery level and charging/USB toggles, rotation) on boards that have them.
 **Mouse on the screen** = touch (click and drag); each button also has a
-board-declared key (agentgauge: **space** = PRIMARY, **tab** = SECONDARY,
+board-declared key (waveshare_amoled_18: **space** = PRIMARY, **tab** = SECONDARY,
 **p** = PWR); **Esc** closes an open overlay, then quits. PWR follows the
 hardware's hold semantics: a quick press or click is a short press; holding
 past 1.5 s emits the long-press edge (for a firmware's hold-release gesture).
@@ -133,7 +134,7 @@ Scenarios are ordered JSON steps, useful in CI:
 
 ```json
 {
-  "target": "agentgauge",
+  "target": "waveshare_amoled_18",
   "steps": [
     { "cmd": "screenshot", "out": "01-waiting.png" },
     { "cmd": "snapshot", "data": {"lim":1,"s5":42,"s5r":180,"s7":10,"s7r":6000} },
@@ -151,9 +152,9 @@ stderr.
 For LVGL targets there is a **snapshot-ref model** like a browser page snapshot:
 
 ```bash
-esprite ui --target agentgauge
+esprite ui --target waveshare_amoled_18
 # [{"ref":"e6","type":"bar","x":36,"y":168,"w":408,"h":24,"value":42}, ...]
-esprite tap --ref e6 --target agentgauge     # tap that widget, not a pixel
+esprite tap --ref e6 --target waveshare_amoled_18   # tap that widget, not a pixel
 ```
 
 `ui` returns the live widget tree (refs, type, coords, text, bar/arc values), so
@@ -164,7 +165,7 @@ The `run` daemon is a persistent session where refs from `ui` stay valid across
 the session (one boot per session; `steps` advances virtual time explicitly):
 
 ```
-{"cmd":"boot","target":"agentgauge"}
+{"cmd":"boot","target":"waveshare_amoled_18"}
 {"cmd":"snapshot","data":{"lim":1,"s5":42,"s5r":180,"s7":10,"s7r":6000}}
 {"cmd":"ui"}                              # read the updated tree, get refs
 {"cmd":"tap","ref":"e6"}                  # act on a ref

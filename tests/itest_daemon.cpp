@@ -48,7 +48,7 @@ TEST_CASE("run session: injected snapshot data is rendered, not just applied to 
     // tap and the explicit steps command are side-effect-free (no input lands,
     // no view changes), so the painted-bars assertion below stays valid.
     std::string out = run_daemon(
-        "{\"cmd\":\"boot\",\"target\":\"agentgauge\"}\n"
+        "{\"cmd\":\"boot\",\"target\":\"waveshare_amoled_18\"}\n"
         "{\"cmd\":\"snapshot\",\"data\":{\"lim\":1,\"s5\":42,\"s5r\":180,"
         "\"s7\":10,\"s7r\":6000,\"ctx\":55,\"cost\":1.5,\"model\":\"opus\"}}\n"
         "{\"cmd\":\"ui\"}\n"

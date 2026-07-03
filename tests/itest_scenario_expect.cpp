@@ -13,7 +13,7 @@ TEST_CASE("a scenario expect passes on real text and fails (exit 8) on a miss") 
     REQUIRE(f != nullptr);
     // Inject limits, then a passing expect (Limits title) and a failing one. The
     // runner tallies the failure and returns the expect_failed exit code (8).
-    fputs("{\"target\":\"agentgauge\",\"steps\":["
+    fputs("{\"target\":\"waveshare_amoled_18\",\"steps\":["
           "{\"cmd\":\"snapshot\",\"data\":{\"lim\":1,\"s5\":42,\"s5r\":180,\"s7\":10,\"s7r\":6000}},"
           "{\"cmd\":\"steps\",\"n\":40},"
           "{\"cmd\":\"expect\",\"text\":\"Limits\"},"

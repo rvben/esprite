@@ -6,7 +6,7 @@
 #include "Print.h"
 
 // Generality proofs: standard Arduino_GFX sketches boot and render with no
-// app-specific sim code, on boards unlike the Waveshare/agentgauge targets.
+// app-specific sim code, on boards unlike the waveshare_amoled_18 target.
 // Shares the sim_itests binary (main is in itest_main.cpp).
 
 TEST_CASE("sample_gfx boots and renders with zero app-specific sim code") {

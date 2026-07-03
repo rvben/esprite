@@ -12,7 +12,7 @@ TEST_CASE("one-shot ui slices the live widget tree with offset/limit") {
     // yet) sits in STALE state: 4 elements on the active screen (e0 title,
     // e1 idle overlay, e2 idle label, e3 status label). offset=1/limit=2
     // exercises both the offset skip and real truncation against that tree.
-    CHECK(run_cli_out({"esprite", "ui", "--target", "agentgauge",
+    CHECK(run_cli_out({"esprite", "ui", "--target", "waveshare_amoled_18",
                        "--offset", "1", "--limit", "2"}, &out) == 0);
     unsetenv("ESPRITE_HTTP_PORT");
 
