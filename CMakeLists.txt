@@ -292,6 +292,7 @@ add_executable(sim_tests
     tests/test_qemu_board.cpp
     tests/test_qemu_display_gating.cpp
     tests/test_agent_link.cpp
+    tests/test_scenario_steps.cpp
 )
 target_link_libraries(sim_tests PRIVATE cli_lib)
 link_sim_targets(sim_tests)

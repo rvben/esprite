@@ -16,10 +16,11 @@ static bool qemu_agent_active() {
     return t && t->backend == BACKEND_QEMU;
 }
 
-// Matches serial_settle()'s native-steps branch in cli.cpp for the "serial
-// expect" command; the scenario runner has no qemu backend to consider, so
-// there is only the one (native) case here.
+// Matches cli.cpp's serial_settle for the "serial expect" command: native
+// targets step their loop, a qemu target pumps its child for wall-clock time
+// (it has no in-process loop to step).
 static const int SERIAL_SETTLE_STEPS = 60;
+static const unsigned SERIAL_SETTLE_QEMU_MS = 500;
 
 const BoardDesc* active_board() {
     const SimTarget* t = sim_active_target();
@@ -130,10 +131,14 @@ ActionError apply_serial_expect(const char* text, const char* absent) {
         return {"bad_args", std::string("invalid regex '") + text + "'"};
     if (absent && *absent && !sim_serial_regex_valid(absent))
         return {"bad_args", std::string("invalid regex '") + absent + "'"};
-    sim_run_steps(SERIAL_SETTLE_STEPS);
-    if (text && *text && !sim_serial_contains(text))
+    if (qemu_agent_active()) sim_backend().settle_ms(SERIAL_SETTLE_QEMU_MS);
+    else sim_run_steps(SERIAL_SETTLE_STEPS);
+    // The backend's serial capture, not the native shim directly, so the
+    // same assertion works against a qemu child's output.
+    std::string out = sim_backend().serial_output();
+    if (text && *text && !sim_serial_regex_search(out, text))
         return {"expect_failed", std::string("serial output does not match '") + text + "'"};
-    if (absent && *absent && sim_serial_contains(absent))
+    if (absent && *absent && sim_serial_regex_search(out, absent))
         return {"expect_failed", std::string("serial output unexpectedly matches '") + absent + "'"};
     return {};
 }

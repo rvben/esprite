@@ -251,7 +251,7 @@ static const std::string kSchema = std::string(R"JSON({
     { "name": "logs", "description": "Print captured device serial output.", "mutating": false, "stability": "stable",
       "example": { "args": ["--target", "waveshare_amoled_18"], "stdin": "" },
       "output_fields": [ { "name": "serial", "description": "Captured serial text.", "type": "string" } ] },
-    { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless.", "mutating": true, "stability": "stable",
+    { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless, on native and qemu targets. Steps: snapshot, screenshot, steps (native-only), settle {ms} (portable time), pixel {x,y,value,timeout_ms} (framebuffer assertion with a retry deadline; the emulator golden primitive), battery, button, tap, swipe, expect (native-only; use pixel/serial on qemu), rotate, motion, serial {expect,absent}, gpio, wifi, ble. Steps needing a capability the target lacks fail individually with unsupported.", "mutating": true, "stability": "stable",
       "args": [ { "name": "file", "description": "Scenario JSON path.", "type": "string", "required": true } ] },
     { "name": "serve", "description": "Boot and keep pumping so a live bridge can drive the device. HTTP: a bridge POSTs to the firmware's webserver (--port). BLE: --ble-port N exposes the virtual BLE link as newline-delimited JSON on a localhost TCP socket (connect = bonded central, lines in = host->device, device lines stream back; one client at a time). --window opens an interactive device-bezel window (mouse=touch, clickable board buttons with hover tooltips, ? for help, and a backtick-opened hardware panel with battery/USB/rotate controls on boards that have them). Human logs on stderr. On a qemu-backed target, serve boots and pumps serial I/O until interrupted; there is no HTTP webserver or native BLE link, so --ble-port is rejected as unsupported. When the qemu target's board spec declares a display, --shot and --window mirror the guest panel via QMP screendump (10 Hz for the window); on a display-less qemu target they are rejected as unsupported (see the backend field on list-targets).", "mutating": true, "stability": "stable" },
     { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), swipe (x1,y1,x2,y2), expect (text/absent/match), button, battery, rotate, motion, gpio, wifi, ble (sub+data/passkey), snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
@@ -496,12 +496,9 @@ int esprite_main(int argc, char** argv) {
         if (file.empty()) return fail("bad_args", "scenario needs a file path", 2);
         std::string def = resolve_target(argc, argv);
         std::string effective = def.empty() ? "waveshare_amoled_18" : def;
-        // scenario_run stays native-only (it drives the in-process
-        // framebuffer/widget tree); gate before ever opening the file, so no
-        // QEMU process is spawned for a target this can never support.
-        if (const SimTarget* target = sim_target(effective))
-            if (target->backend == BACKEND_QEMU)
-                return fail("unsupported", "scenario is native-only; '" + effective + "' boots via qemu", 7);
+        // scenario_run boots through the backend seam and gates per step, so
+        // qemu targets run scenarios too (steps needing the native surface
+        // fail with unsupported individually).
         return scenario_run(file, effective);
     }
 
