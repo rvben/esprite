@@ -43,6 +43,7 @@ inline int kind_exit(const std::string& kind) {
     if (kind == "bind_failed")   return 3;
     if (kind == "expect_failed") return 8;
     if (kind == "capture_failed") return 9;
+    if (kind == "agent_failed")  return 10;
     return 2;   // bad_args, no_target, unknown_target, backend_unavailable
 }
 

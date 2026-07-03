@@ -39,11 +39,10 @@ TEST_CASE("serial and logs stay allowed on both qemu targets at the gate") {
     CHECK(err.find("\"kind\":\"backend_unavailable\"") != std::string::npos);
 }
 
-TEST_CASE("ui and tap remain unsupported on the rgb qemu target") {
+TEST_CASE("ui remains unsupported on the rgb qemu target (no in-process widget tree)") {
     clear_qemu_env();
     std::string err;
     CHECK(run_cli_err({"esprite", "ui", "--target", "qemu_esp32c3_rgb"}, &err) == 7);
-    CHECK(run_cli_err({"esprite", "tap", "10", "10", "--target", "qemu_esp32c3_rgb"}, &err) == 7);
 }
 
 TEST_CASE("serve --shot: display-less qemu rejected at the gate, rgb target reaches boot") {
@@ -64,4 +63,43 @@ TEST_CASE("schema documents capture_failed with exit code 9") {
     CHECK(run_cli_out({"esprite", "schema"}, &out) == 0);
     CHECK(out.find("\"kind\": \"capture_failed\"") != std::string::npos);
     CHECK(out.find("\"exit_code\": 9") != std::string::npos);
+}
+
+TEST_CASE("input commands pass the gate on the agent-capable qemu target") {
+    clear_qemu_env();
+    std::string err;
+    // Boot fails (no env), the gate does not: the old behavior was exit 7.
+    CHECK(run_cli_err({"esprite", "tap", "10", "10", "--target", "qemu_esp32c3_rgb"}, &err) == 2);
+    CHECK(err.find("\"kind\":\"backend_unavailable\"") != std::string::npos);
+    err.clear();
+    CHECK(run_cli_err({"esprite", "gpio", "9", "0", "--target", "qemu_esp32c3_rgb"}, &err) == 2);
+    err.clear();
+    CHECK(run_cli_err({"esprite", "swipe", "10", "10", "50", "50", "--target", "qemu_esp32c3_rgb"}, &err) == 2);
+    err.clear();
+    CHECK(run_cli_err({"esprite", "button", "BOOT", "--target", "qemu_esp32c3_rgb"}, &err) == 2);
+}
+
+TEST_CASE("input commands stay unsupported on the agent-less qemu target") {
+    clear_qemu_env();
+    std::string err;
+    CHECK(run_cli_err({"esprite", "tap", "10", "10", "--target", "qemu_esp32c3"}, &err) == 7);
+    CHECK(err.find("agent") != std::string::npos);
+    err.clear();
+    CHECK(run_cli_err({"esprite", "gpio", "9", "0", "--target", "qemu_esp32c3"}, &err) == 7);
+}
+
+TEST_CASE("button accepts a board button label on a native target") {
+    // cyd declares one button labeled BOOT (ACT_PRIMARY); pressing it by
+    // label must work exactly like the semantic name. Case-insensitive.
+    std::string err;
+    CHECK(run_cli_err({"esprite", "button", "boot", "--target", "cyd"}, &err) == 0);
+    CHECK(run_cli_err({"esprite", "button", "NOSUCH", "--target", "cyd"}, &err) == 2);
+    CHECK(err.find("\"kind\":\"bad_args\"") != std::string::npos);
+}
+
+TEST_CASE("schema documents agent_failed with exit code 10") {
+    std::string out;
+    CHECK(run_cli_out({"esprite", "schema"}, &out) == 0);
+    CHECK(out.find("\"kind\": \"agent_failed\"") != std::string::npos);
+    CHECK(out.find("\"exit_code\": 10") != std::string::npos);
 }
