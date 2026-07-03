@@ -226,6 +226,7 @@ TEST_CASE("CLI run session: screenshot on qemu_esp32c3_rgb lands guest pixels in
 }
 
 #include "agent_link.h"
+#include <cstring>
 #include <fstream>
 #include <sstream>
 
