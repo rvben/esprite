@@ -7,6 +7,9 @@
     { "cmd": "pixel", "x": 160, "y": 120, "value": 0, "timeout_ms": 10000 },
     { "cmd": "button", "which": "BOOT" },
     { "cmd": "pixel", "x": 80, "y": 60, "value": 2016, "timeout_ms": 10000 },
-    { "cmd": "screenshot", "out": "02-inverted.png" }
+    { "cmd": "screenshot", "out": "02-inverted.png" },
+    { "cmd": "snapshot", "data": { "color": 63519 } },
+    { "cmd": "pixel", "x": 240, "y": 60, "value": 63519, "timeout_ms": 10000 },
+    { "cmd": "screenshot", "out": "03-snapshot.png" }
   ]
 }
