@@ -46,6 +46,19 @@ TEST_CASE("ui and tap remain unsupported on the rgb qemu target") {
     CHECK(run_cli_err({"esprite", "tap", "10", "10", "--target", "qemu_esp32c3_rgb"}, &err) == 7);
 }
 
+TEST_CASE("serve --shot: display-less qemu rejected at the gate, rgb target reaches boot") {
+    clear_qemu_env();
+    std::string err;
+    CHECK(run_cli_err({"esprite", "serve", "--target", "qemu_esp32c3", "--shot", "/tmp/x.png"}, &err) == 7);
+    CHECK(err.find("\"kind\":\"unsupported\"") != std::string::npos);
+    err.clear();
+    CHECK(run_cli_err({"esprite", "serve", "--target", "qemu_esp32c3_rgb", "--shot", "/tmp/x.png"}, &err) == 2);
+    CHECK(err.find("\"kind\":\"backend_unavailable\"") != std::string::npos);
+    // --ble-port stays rejected even on the display target.
+    err.clear();
+    CHECK(run_cli_err({"esprite", "serve", "--target", "qemu_esp32c3_rgb", "--ble-port", "0"}, &err) == 7);
+}
+
 TEST_CASE("schema documents capture_failed with exit code 9") {
     std::string out;
     CHECK(run_cli_out({"esprite", "schema"}, &out) == 0);
