@@ -9,8 +9,9 @@ backends behind one contract:
   touch), serial, and scripted scenarios. Fast, deterministic, no
   cross-toolchain needed.
 - **QEMU (optional):** boots a **real compiled flash image** under Espressif's
-  QEMU fork and drives it serial-first through the same CLI, including
-  binaries you cannot build from source. See "The QEMU backend" below.
+  QEMU fork and drives it through the same CLI: serial for any image, plus
+  screenshots and the live window for firmware built against the fork's
+  virtual RGB panel. See "The QEMU backend" below.
 
 It is a reusable tool, not tied to any one app. A **firmware** is compiled once
 and is board-agnostic (it renders itself from `board_caps()` at runtime); a
@@ -193,14 +194,25 @@ make qemu-fixtures     # scripted demo images (needs docker + arduino-cli)
 make qemu-test         # gated integration tests (self-skip without QEMU)
 ```
 
-Support is serial-first for now: `serial`, `logs`, and headless `serve` work;
-every other command degrades explicitly to `unsupported`, exactly like a board
-without a battery rejects `battery`. Execution is deterministic on ESP32-C3
-(icount: same image, same serial bytes, every run); ESP32/S3 (Xtensa) run
-wall-clock only in the current fork release. `list-targets` reports each
-target's `backend`, and a missing emulator or image yields the
-`backend_unavailable` error kind with the missing piece named. Display,
-input, and networking over QEMU are on the roadmap.
+Tier 1 (any image): `serial`, `logs`, and headless `serve` work; every other
+command degrades explicitly to `unsupported`, exactly like a board without a
+battery rejects `battery`. Execution is deterministic on ESP32-C3 (icount:
+same image, same serial bytes, every run); ESP32/S3 (Xtensa) run wall-clock
+only in the current fork release. `list-targets` reports each target's
+`backend`, and a missing emulator or image yields the `backend_unavailable`
+error kind with the missing piece named.
+
+Tier 2 (cooperating firmware) adds the display: build the firmware against
+Espressif's `esp_lcd_qemu_rgb` component and boot it on `qemu_esp32c3_rgb`
+(320x240 virtual RGB panel), and `screenshot`, `serve --shot`, and the live
+`--window` work exactly as on native targets, fed by QMP screendump. Draw
+full frames: the virtual panel consumes one pending draw per host-side
+capture, so per-line drawing stalls headless firmware.
+
+Qemu targets are data, not code: `targets/qemu/*.json` (key, machine, arch,
+optional display dimensions) ship inside the binary, and
+`ESPRITE_QEMU_BOARD=/path/to/board.json` registers your own board at runtime
+without a rebuild. Input and networking over QEMU are on the roadmap.
 
 ## How it works
 
