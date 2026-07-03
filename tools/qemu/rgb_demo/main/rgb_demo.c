@@ -24,6 +24,15 @@
 #define H 240
 #define BTN_PIN 9
 #define SQ 20
+#define MARK_X 240
+#define MARK_Y 60
+#define MARK 40
+
+// rgb_net.c: openeth + HTTP server; POST /snapshot recolors the marker
+// square via this event counter.
+void rgb_net_start(void);
+extern volatile int g_marker_color;
+extern volatile int g_marker_events;
 
 void app_main(void) {
     esp_lcd_panel_handle_t panel = NULL;
@@ -37,15 +46,17 @@ void app_main(void) {
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
 
     esprite_agent_start();
+    rgb_net_start();
 
-    uint16_t *fb = malloc(W * H * sizeof(uint16_t));
-    if (!fb) {
-        printf("rgb_demo alloc failed\n");
-        return;
-    }
+    // Static, not heap: the frame is 150 KB and the network stack's heap
+    // appetite (lwIP + httpd) made a late malloc of that size fail on the
+    // C3's RAM budget. .bss placement is fragmentation-proof.
+    static uint16_t fb[W * H];
 
     int inv = 0, events_seen = 0;
     int have_sq = 0, sq_x = 0, sq_y = 0;
+    int marker_seen = 0, have_marker = 0;
+    uint16_t marker = 0;
     printf("rgb_demo drawing\n");
     for (;;) {
         int dirty = 0;
@@ -68,6 +79,12 @@ void app_main(void) {
             sq_y = ty;
             dirty = 1;
         }
+        if (g_marker_events != marker_seen) {
+            marker_seen = g_marker_events;
+            have_marker = 1;
+            marker = (uint16_t)g_marker_color;
+            dirty = 1;
+        }
         static int drawn_once = 0;
         if (dirty || !drawn_once) {
             drawn_once = 1;
@@ -81,6 +98,10 @@ void app_main(void) {
                 for (int y = sq_y - SQ / 2; y < sq_y + SQ / 2; y++)
                     for (int x = sq_x - SQ / 2; x < sq_x + SQ / 2; x++)
                         if (x >= 0 && x < W && y >= 0 && y < H) fb[y * W + x] = 0x0000;
+            if (have_marker)
+                for (int y = MARK_Y - MARK / 2; y < MARK_Y + MARK / 2; y++)
+                    for (int x = MARK_X - MARK / 2; x < MARK_X + MARK / 2; x++)
+                        if (x >= 0 && x < W && y >= 0 && y < H) fb[y * W + x] = marker;
             // Blocks until a host-side capture consumes the frame.
             ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel, 0, 0, W, H, fb));
             printf("rgb_demo state touch=%d inv=%d\n", have_sq, inv);

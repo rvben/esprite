@@ -55,6 +55,10 @@ struct QemuMachineSpec {
     // UART1, so the backend opens the agent chardev and the input commands
     // (tap/swipe/gpio/button) route through it.
     bool        agent = false;
+    // Tier-2 networking: the guest port the firmware's HTTP server listens
+    // on (0 = none). The backend forwards an ephemeral localhost port to it
+    // via user-net hostfwd, and `snapshot` posts through the forward.
+    int         http_guest_port = 0;
 };
 
 // A registered target: an onboarded app the sim can boot. setup()/loop() are the

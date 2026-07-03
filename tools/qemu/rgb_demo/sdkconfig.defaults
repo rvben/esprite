@@ -3,3 +3,5 @@
 # the IDLE task into task-watchdog serial spam. The fixture has no other
 # watchdog-worthy work, so disable it.
 CONFIG_ESP_TASK_WDT_INIT=n
+# The OpenCores ethernet the QEMU machine emulates (no real ESP32-C3 has it).
+CONFIG_ETH_USE_OPENETH=y

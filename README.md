@@ -218,15 +218,22 @@ APIs (`esprite_agent_touch_events`, `esprite_agent_gpio_events`) instead of
 the hardware drivers. `scenario` runs on qemu targets too: `settle` is the
 portable time verb, and the `pixel` step (a framebuffer assertion with a
 retry deadline) plus byte-exact screenshot goldens make emulator UI tests
-deterministic; see `scenarios/qemu_esp32c3_rgb.json` for a tap-and-press
-example against the bundled fixture.
+deterministic; see `scenarios/qemu_esp32c3_rgb.json` for a
+tap-press-and-post example against the bundled fixture.
+
+Networking closes the loop: the machine emulates an OpenCores ethernet, and
+a board spec with `"http": {"guest_port": N}` gets user-mode networking with
+a localhost port forwarded into the guest, so `snapshot` POSTs into the
+firmware's real HTTP server (lwIP over the emulated NIC; build with
+`CONFIG_ETH_USE_OPENETH=y`). `serve` prints the forwarded URL for live
+bridges.
 
 Qemu targets are data, not code: `targets/qemu/*.json` (key, machine, arch,
-optional display dimensions, agent flag, buttons) ship inside the binary,
-and `ESPRITE_QEMU_BOARD=/path/to/board.json` registers your own board at
-runtime without a rebuild. Board-spec buttons render as bezel nubs in
-`--window` (view-only on qemu: window clicks do not route through the agent
-yet). Networking over QEMU is on the roadmap.
+optional display dimensions, agent flag, buttons, http capability) ship
+inside the binary, and `ESPRITE_QEMU_BOARD=/path/to/board.json` registers
+your own board at runtime without a rebuild. Board-spec buttons render as
+bezel nubs in `--window` (view-only on qemu: window clicks do not route
+through the agent yet).
 
 ## How it works
 

@@ -1,6 +1,7 @@
 #include "backend.h"
 #include "runtime.h"
 #include "Print.h"
+#include "WebServer.h"
 
 // Steps to run after boot so the firmware's first frame (and any UI refs it
 // registers) settle before the CLI acts on it. Moved here from cli.cpp: it is
@@ -23,6 +24,10 @@ struct NativeBackend : SimBackend {
     void tick() override { sim_run_steps(4); }
     std::string serial_output() override { return sim_serial_output(); }
     bool serial_inject(const std::string& data) override { sim_serial_inject(data); return true; }
+    int http_port() override {
+        int p = sim_http_bind_status();
+        return p > 0 ? p : 0;
+    }
     const char* name() const override { return "native"; }
 };
 

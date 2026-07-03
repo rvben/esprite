@@ -294,7 +294,7 @@ TEST_CASE("CLI scenario: tap and button drive the guest, goldens match byte-exac
     // Same steps as the committed scenario, with the relative screenshot
     // outputs redirected to the scratch dir (ctest's cwd is the build dir).
     std::string body = slurp_file(scn_src);
-    for (const char* name : {"01-quadrants.png", "02-inverted.png"}) {
+    for (const char* name : {"01-quadrants.png", "02-inverted.png", "03-snapshot.png"}) {
         size_t at = body.find(name);
         REQUIRE(at != std::string::npos);
         body.replace(at, strlen(name), dir + "/" + name);
@@ -314,7 +314,7 @@ TEST_CASE("CLI scenario: tap and button drive the guest, goldens match byte-exac
 
     // Byte-exact goldens: the fixture's states are flat colors and the PNG
     // encoder is deterministic, so any pixel drift is a real regression.
-    for (const char* name : {"01-quadrants.png", "02-inverted.png"}) {
+    for (const char* name : {"01-quadrants.png", "02-inverted.png", "03-snapshot.png"}) {
         std::string got = slurp_file(dir + "/" + name);
         std::string want = slurp_file(resolve_repo_file(std::string("tests/goldens/qemu/") + name));
         REQUIRE_MESSAGE(!got.empty(), "scenario did not write ", name);

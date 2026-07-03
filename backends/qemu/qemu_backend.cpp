@@ -119,6 +119,22 @@ struct QemuBackend : SimBackend {
         // connects lazily on the first injection.
         agent_capable_ = t->qemu->agent;
         if (agent_capable_) spec.agent_socket = socket_dir_ + "/agent.sock";
+
+        // Http-capable boards get user-net with a hostfwd into the guest's
+        // server; `snapshot` posts to this localhost port.
+        http_port_ = 0;
+        if (t->qemu->http_guest_port > 0) {
+            std::string port_err;
+            int host_port = allocate_ephemeral_port(&port_err);
+            if (host_port == 0) {
+                set_err(err, "could not allocate an http forward port: " + port_err);
+                cleanup_dir();
+                return false;
+            }
+            spec.http_host_port = host_port;
+            spec.http_guest_port = t->qemu->http_guest_port;
+            http_port_ = host_port;
+        }
         spec.interrupted = interrupted_;   // lets start()'s QMP retry loop bail early on SIGINT/SIGTERM
 
         if (!process_.start(spec, err)) { cleanup_dir(); return false; }
@@ -172,9 +188,12 @@ struct QemuBackend : SimBackend {
     void shutdown() override {
         agent_.close();
         agent_capable_ = false;
+        http_port_ = 0;
         process_.stop();
         cleanup_dir();
     }
+
+    int http_port() override { return process_.running() ? http_port_ : 0; }
 
     // Returns false if interrupted before the deadline (an early bail-out,
     // not a pump failure); boot() treats that as a failed boot. Callers that
@@ -303,6 +322,7 @@ private:
     QemuProcess process_;
     AgentLink agent_;
     bool agent_capable_ = false;
+    int http_port_ = 0;
     std::string socket_dir_;
     // Optional CLI-supplied signal-flag accessor; null when nothing wired one
     // up (e.g. a unit test that never calls the (interrupted) overload of

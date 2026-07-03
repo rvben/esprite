@@ -43,6 +43,12 @@ struct SimBackend {
         if (err) *err = "no input agent on this backend";
         return false;
     }
+
+    // The localhost TCP port where the booted firmware's HTTP server is
+    // reachable, or 0 when it has none. Native: the webserver shim's bound
+    // port. Qemu: the user-net hostfwd port when the board spec declares an
+    // http capability. sim_wifi_post targets this - one code path for both.
+    virtual int http_port() { return 0; }
     virtual const char* name() const = 0;          // "native" | "qemu"
 };
 

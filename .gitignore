@@ -3,6 +3,8 @@ build-release/
 dist/
 *.png
 !docs/**/*.png
+# Emulator golden screenshots ARE committed (byte-exact test references).
+!tests/goldens/**/*.png
 .DS_Store
 _deps/
 CMakeCache.txt

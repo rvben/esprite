@@ -124,6 +124,32 @@ TEST_CASE("qemu_board_register materializes agent buttons as board SimButtons") 
     CHECK(t->board->buttons[0].active_low);
 }
 
+TEST_CASE("qemu_board_parse reads the http capability") {
+    QemuBoardSpec s;
+    std::string err;
+    REQUIRE_MESSAGE(qemu_board_parse(R"json({
+        "key": "k", "description": "d", "machine": "esp32c3", "arch": "riscv32",
+        "http": {"guest_port": 80}
+    })json", &s, &err), err);
+    CHECK(s.http_guest_port == 80);
+    CHECK_FALSE(qemu_board_parse(R"json({"key":"k","description":"d","machine":"m","arch":"riscv32",
+        "http":{"guest_port":0}})json", &s, &err));
+    CHECK_FALSE(qemu_board_parse(R"json({"key":"k","description":"d","machine":"m","arch":"riscv32",
+        "http":{}})json", &s, &err));
+}
+
+TEST_CASE("qemu_board_register carries the http guest port into the machine spec") {
+    QemuBoardSpec s;
+    std::string err;
+    REQUIRE(qemu_board_parse(R"json({
+        "key": "test_qemu_board_http", "description": "d", "machine": "esp32c3",
+        "arch": "riscv32", "http": {"guest_port": 8080}
+    })json", &s, &err));
+    const SimTarget* t = qemu_board_register(s, &err);
+    REQUIRE_MESSAGE(t != nullptr, err);
+    CHECK(t->qemu->http_guest_port == 8080);
+}
+
 TEST_CASE("ESPRITE_QEMU_BOARD registers a user board file") {
     std::string dir = "/tmp/esprite_test_qemu_board";
     system(("rm -rf " + dir + " && mkdir -p " + dir).c_str());

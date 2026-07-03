@@ -1,0 +1,42 @@
+# Informational emulator job: boots real flash images under Espressif QEMU
+# and runs the gated integration suite (display, input agent, networking,
+# byte-exact goldens). Separate from ci.yml and non-blocking by design - the
+# emulator's wall-clock timing is host-load sensitive, so this signals rather
+# than gates. Every step is a make target, runnable locally as-is.
+name: qemu (informational)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  qemu-itests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache the prebuilt emulator
+        uses: actions/cache@v4
+        with:
+          path: .qemu
+          key: qemu-${{ hashFiles('tools/qemu/fetch-qemu.sh') }}
+
+      - name: Cache the fixture image
+        id: fixture
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/qemu/rgb_c3.bin
+          key: rgb-fixture-${{ hashFiles('tools/qemu/rgb_demo/**', 'tools/qemu/esprite_qemu_agent/**', 'tools/qemu/build-rgb-fixture.sh') }}
+
+      - name: Fetch the emulator
+        run: test -f .qemu/env.sh || make qemu-fetch
+
+      - name: Build the fixture
+        if: steps.fixture.outputs.cache-hit != 'true'
+        run: bash tools/qemu/build-rgb-fixture.sh
+
+      - run: make build
+
+      - name: Run the gated emulator suite
+        run: make qemu-test

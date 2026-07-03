@@ -1,6 +1,8 @@
 #include "qemu_process.h"
 #include <spawn.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 #include <signal.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -102,6 +104,14 @@ std::vector<std::string> qemu_build_argv(const QemuSpec& spec) {
         "-drive", "file=" + spec.flash_image + ",if=mtd,format=raw",
         "-qmp", "unix:" + spec.qmp_socket + ",server=on,wait=off",
     });
+    if (spec.http_host_port > 0 && spec.http_guest_port > 0) {
+        // User-mode networking on the machine's OpenCores ethernet; the
+        // forward is how `snapshot` reaches the guest's HTTP server.
+        argv.insert(argv.end(), {"-nic",
+            "user,model=open_eth,hostfwd=tcp:127.0.0.1:" +
+            std::to_string(spec.http_host_port) + "-:" +
+            std::to_string(spec.http_guest_port)});
+    }
     // Deliberately no "-monitor none": Task 2's spike found it intermittently
     // hangs this QEMU build, and Espressif's own pytest-embedded-qemu never
     // passes it either.
@@ -114,6 +124,28 @@ std::vector<std::string> qemu_build_argv(const QemuSpec& spec) {
 
 bool qemu_needs_fd_normalize(int fd) {
     return fd >= 0 && fd <= STDERR_FILENO;
+}
+
+int allocate_ephemeral_port(std::string* err) {
+    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        if (err) *err = std::string("socket: ") + strerror(errno);
+        return 0;
+    }
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    a.sin_port = 0;
+    socklen_t len = sizeof(a);
+    int port = 0;
+    if (::bind(fd, (sockaddr*)&a, sizeof(a)) == 0 &&
+        ::getsockname(fd, (sockaddr*)&a, &len) == 0) {
+        port = ntohs(a.sin_port);
+    } else if (err) {
+        *err = std::string("bind/getsockname: ") + strerror(errno);
+    }
+    ::close(fd);
+    return port;
 }
 
 QemuProcess::~QemuProcess() { stop(); }

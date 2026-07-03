@@ -41,6 +41,26 @@ TEST_CASE("qemu argv wires the agent chardev to UART1 and keeps the console on s
     CHECK(v == want);
 }
 
+TEST_CASE("qemu argv adds user-net hostfwd for http-capable boards") {
+    QemuSpec s{"/q/qemu-system-riscv32", "esp32c3", "/f/flash.bin", false, "/tmp/q.sock"};
+    s.http_host_port = 18080;
+    s.http_guest_port = 80;
+    auto v = qemu_build_argv(s);
+    std::vector<std::string> want = {
+        "/q/qemu-system-riscv32", "-machine", "esp32c3", "-nographic",
+        "-drive", "file=/f/flash.bin,if=mtd,format=raw",
+        "-qmp", "unix:/tmp/q.sock,server=on,wait=off",
+        "-nic", "user,model=open_eth,hostfwd=tcp:127.0.0.1:18080-:80"};
+    CHECK(v == want);
+}
+
+TEST_CASE("allocate_ephemeral_port returns a usable localhost port") {
+    std::string err;
+    int p = allocate_ephemeral_port(&err);
+    CHECK_MESSAGE(p > 0, err);
+    CHECK(p <= 65535);
+}
+
 TEST_CASE("child lifecycle: spawn, capture stdout, orderly stop") {
     // Uses /bin/cat with spawn_only() (spawn without QMP connect) so the
     // process plumbing is tested without QEMU. echo via stdin -> stdout.
