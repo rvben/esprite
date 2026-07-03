@@ -38,6 +38,15 @@ bool qemu_board_parse(const std::string& json, QemuBoardSpec* spec, std::string*
         spec->display_h = h;
     }
     spec->agent = doc["agent"] | false;
+    spec->http_guest_port = 0;
+    if (!doc["http"].isNull()) {
+        int gp = doc["http"]["guest_port"] | 0;
+        if (gp < 1 || gp > 65535) {
+            if (err) *err = "board spec http needs guest_port in 1..65535";
+            return false;
+        }
+        spec->http_guest_port = gp;
+    }
     spec->buttons.clear();
     if (!doc["buttons"].isNull()) {
         if (!spec->agent) {
@@ -115,7 +124,7 @@ const SimTarget* qemu_board_register(const QemuBoardSpec& spec, std::string* err
                 false, false, false,   // has_rotation, has_battery, has_imu
                 o->buttons.empty() ? nullptr : o->buttons.data(),
                 (int)o->buttons.size()};
-    o->qemu = {o->machine.c_str(), o->arch.c_str(), spec.agent};
+    o->qemu = {o->machine.c_str(), o->arch.c_str(), spec.agent, spec.http_guest_port};
     o->target = {o->key.c_str(), o->description.c_str(),
                  nullptr, nullptr,    // no in-process entry points
                  &o->board, BACKEND_QEMU, &o->qemu};

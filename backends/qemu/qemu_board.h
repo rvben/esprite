@@ -28,6 +28,7 @@ struct QemuBoardSpec {
     int display_h = 0;
     bool agent = false;       // firmware carries esprite_qemu_agent on UART1
     std::vector<QemuButtonSpec> buttons;   // requires agent
+    int http_guest_port = 0;  // guest HTTP port for `snapshot` (0 = none)
 };
 
 // Pure parse + validation; no registration, so it is unit-testable without

@@ -20,6 +20,11 @@ struct QemuSpec {
     // an explicit -serial mon:stdio (explicit -serial flags replace the
     // implicit assignment in order).
     std::string agent_socket;
+    // Both nonzero = attach user-mode networking to the machine's OpenCores
+    // ethernet and forward 127.0.0.1:http_host_port to the guest's
+    // http_guest_port (the firmware's HTTP server behind `snapshot`).
+    int http_host_port = 0;
+    int http_guest_port = 0;
     // Optional poll hook for start()'s bounded QMP connect retry: checked each
     // spin so a SIGINT/SIGTERM during boot bails out early instead of blocking
     // through the full window. Backends/qemu must not include cli headers, so
@@ -32,6 +37,12 @@ struct QemuSpec {
 // effects (no spawn, no filesystem access) - see the argv contract in
 // tests/test_qemu_process.cpp for the flags this must always/never emit.
 std::vector<std::string> qemu_build_argv(const QemuSpec& spec);
+
+// Binds 127.0.0.1:0, reads the kernel-assigned port back, and releases it
+// for the QEMU child to claim via hostfwd. The tiny claim race is acceptable
+// for a test tool (retry by rebooting the target). Returns 0 with *err on
+// failure.
+int allocate_ephemeral_port(std::string* err);
 
 // True when fd lands on a standard stream (0/1/2) and must be moved before
 // spawn_only() builds its posix_spawn_file_actions_t: a parent that starts
