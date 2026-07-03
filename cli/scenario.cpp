@@ -25,13 +25,14 @@
 static const size_t MAX_REQUEST = 15000;
 
 bool sim_wifi_post(const std::string& path, const std::string& body) {
-    // Deliver only to the port the active target actually bound. If it never
-    // started a server (-1) or its bind failed (0), a connect against the
-    // configured port could reach an unrelated host process and make an
-    // undelivered post look successful. Refuse instead.
-    int port = sim_http_bind_status();
+    // Deliver only to the port the active backend reports for the booted
+    // firmware's HTTP server (native: the webserver shim's bound port; qemu:
+    // the user-net hostfwd port). A blind connect against a configured port
+    // could reach an unrelated host process and make an undelivered post
+    // look successful. Refuse instead.
+    int port = sim_backend().http_port();
     if (port <= 0) {
-        fprintf(stderr, "sim_wifi_post: target has no bound HTTP server; dropped\n");
+        fprintf(stderr, "sim_wifi_post: target has no reachable HTTP server; dropped\n");
         return false;
     }
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -114,7 +115,7 @@ int scenario_run(const std::string& path, const std::string& default_target) {
             if (!sim_wifi_post(step["path"] | "/snapshot", body))
                 step_failed("post_failed", "snapshot step not delivered (dropped)");
             else
-                sim_settle_ms();   // let the firmware render the injected data
+                sim_backend().settle_ms(50);   // let the firmware render the injected data
         } else if (!strcmp(cmd, "screenshot")) {
             if (!is_qemu) sim_settle_ms();   // capture a settled frame, whatever ran before
             // Sync-then-capture, one code path for both backends (native

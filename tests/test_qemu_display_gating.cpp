@@ -88,6 +88,18 @@ TEST_CASE("input commands stay unsupported on the agent-less qemu target") {
     CHECK(run_cli_err({"esprite", "gpio", "9", "0", "--target", "qemu_esp32c3"}, &err) == 7);
 }
 
+TEST_CASE("snapshot passes the gate on the http-capable qemu target only") {
+    clear_qemu_env();
+    std::string err;
+    // http-capable: the gate opens, boot fails on the missing env.
+    CHECK(run_cli_err({"esprite", "snapshot", "{\"color\":1}", "--target", "qemu_esp32c3_rgb"}, &err) == 2);
+    CHECK(err.find("\"kind\":\"backend_unavailable\"") != std::string::npos);
+    // no http capability: rejected before boot, naming what is missing.
+    err.clear();
+    CHECK(run_cli_err({"esprite", "snapshot", "{\"color\":1}", "--target", "qemu_esp32c3"}, &err) == 7);
+    CHECK(err.find("http") != std::string::npos);
+}
+
 TEST_CASE("button accepts a board button label on a native target") {
     // cyd declares one button labeled BOOT (ACT_PRIMARY); pressing it by
     // label must work exactly like the semantic name. Case-insensitive.

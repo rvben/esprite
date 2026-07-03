@@ -116,23 +116,28 @@ static void install_signal_handlers() {
 // board spec: a display (esp_lcd_qemu_rgb) adds screenshot, the input agent
 // (esprite_qemu_agent) adds tap/swipe/gpio/button; serve's --shot/--window
 // follow the display rule in the serve path itself. Everything else stays
-// unsupported until its milestone lands (HTTP snapshot in M3).
+// unsupported (native-only in-process surfaces like ui refs).
 static bool qemu_command_allowed(const std::string& cmd, const SimTarget* t) {
     if (cmd == "serial" || cmd == "logs" || cmd == "quit" || cmd == "exit") return true;
     bool has_display = t && t->board && t->board->width > 0 && t->board->height > 0;
     bool has_agent   = t && t->qemu && t->qemu->agent;
+    bool has_http    = t && t->qemu && t->qemu->http_guest_port > 0;
     if (cmd == "screenshot") return has_display;
     if (cmd == "tap" || cmd == "swipe" || cmd == "gpio" || cmd == "button") return has_agent;
+    if (cmd == "snapshot") return has_http;
     return false;
 }
 
-// The unsupported-command message names what is actually missing: a display
-// or the input agent in the board spec, the tier-1 restriction otherwise.
+// The unsupported-command message names what is actually missing: a display,
+// the input agent, or the http capability in the board spec, else the tier-1
+// restriction.
 static std::string qemu_unsupported_msg(const std::string& cmd, const std::string& key) {
     const char* why = " (serial/logs only)";
     if (cmd == "screenshot") why = " (its board spec declares no display)";
     else if (cmd == "tap" || cmd == "swipe" || cmd == "gpio" || cmd == "button")
         why = " (its board spec declares no input agent)";
+    else if (cmd == "snapshot")
+        why = " (its board spec declares no http capability)";
     return "'" + cmd + "' is not supported on qemu-backed target '" + key + "'" + why;
 }
 
@@ -187,7 +192,7 @@ static const std::string kSchema = std::string(R"JSON({
         { "name": "w", "description": "Width.", "type": "number" },
         { "name": "h", "description": "Height.", "type": "number" }
       ] },
-    { "name": "snapshot", "description": "POST a JSON body to the device's /snapshot HTTP endpoint (data the firmware parses).", "mutating": true, "stability": "stable",
+    { "name": "snapshot", "description": "POST a JSON body to the device's /snapshot HTTP endpoint (data the firmware parses). Native targets receive it on the in-process webserver; qemu targets whose board spec declares an http capability receive it through a user-net port forward into the emulated NIC (firmware must serve HTTP over openeth).", "mutating": true, "stability": "stable",
       "args": [ { "name": "json", "description": "Wire JSON to POST.", "type": "string", "required": true } ],
       "example": { "args": ["{\"lim\":1,\"s5\":42}", "--target", "waveshare_amoled_18"], "stdin": "" } },
     { "name": "tap", "description": "Inject a touch, by widget ref (--ref e3, from ui) or by pixel (x y).", "mutating": true, "stability": "stable",
@@ -263,7 +268,7 @@ static const std::string kSchema = std::string(R"JSON({
     { "kind": "ref_not_found", "description": "tap --ref referenced a widget not in the current ui snapshot.", "exit_code": 4 },
     { "kind": "conflict", "description": "An argument or option conflicts with another (e.g. tap given both --ref and x/y).", "exit_code": 5 },
     { "kind": "post_failed", "description": "snapshot could not be delivered to the running target (connect failed or body exceeds the server read size).", "exit_code": 6 },
-    { "kind": "unsupported", "description": "The command targets a capability the active board lacks (e.g. battery/rotate on a board without it, or a button the board does not have), or a command outside a qemu target's tier (tier 1: serial/logs/serve; screenshot and serve --shot/--window need a display in the board spec; tap/swipe/gpio/button need \"agent\": true).", "exit_code": 7 },
+    { "kind": "unsupported", "description": "The command targets a capability the active board lacks (e.g. battery/rotate on a board without it, or a button the board does not have), or a command outside a qemu target's tier (tier 1: serial/logs/serve; screenshot and serve --shot/--window need a display in the board spec; tap/swipe/gpio/button need \"agent\": true; snapshot needs \"http\").", "exit_code": 7 },
     { "kind": "bad_args", "description": "Missing or invalid arguments for the command.", "exit_code": 2 },
     { "kind": "expect_failed", "description": "A scenario/run 'expect' assertion did not hold (text present/absent mismatch).", "exit_code": 8 },
     { "kind": "backend_unavailable", "description": "A qemu-backed target could not boot: no qemu-system-<arch> binary configured (set ESPRITE_QEMU_BIN, or ESPRITE_QEMU_RISCV32/ESPRITE_QEMU_XTENSA per the target's architecture), ESPRITE_QEMU_IMAGE unset or not found (the flash image path), or the child process failed to spawn or never reached a running QMP state. Also covers 'serial send' failing against a qemu-backed target whose child has exited or closed its stdin pipe.", "exit_code": 2 },
@@ -571,8 +576,13 @@ int esprite_main(int argc, char** argv) {
 #endif
 
         if (is_qemu) {
-            fprintf(stderr, "esprite: serving '%s' via qemu (%s; no HTTP snapshot)\n",
-                    t.c_str(), qemu_display ? "serial/logs/display" : "serial/logs only");
+            int fwd = sim_backend().http_port();
+            if (fwd > 0)
+                fprintf(stderr, "esprite: serving '%s' via qemu (%s) at http://127.0.0.1:%d/ (forwarded into the guest)\n",
+                        t.c_str(), qemu_display ? "serial/logs/display" : "serial/logs", fwd);
+            else
+                fprintf(stderr, "esprite: serving '%s' via qemu (%s; no HTTP snapshot)\n",
+                        t.c_str(), qemu_display ? "serial/logs/display" : "serial/logs only");
         } else {
             // Report the port the target actually bound (matters when --port 0
             // asked the OS for an ephemeral port), not the raw requested value.
@@ -708,7 +718,7 @@ int esprite_main(int argc, char** argv) {
             return fail("bad_args", "snapshot needs a valid JSON body", 2);
         bool ok = sim_wifi_post(opt_val(argc, argv, "--path") ? opt_val(argc, argv, "--path") : "/snapshot", json);
         if (!ok) return fail("post_failed", "snapshot not delivered (target server unbound/unreachable or body too large)", 6);
-        sim_settle_ms();   // let the firmware render the injected data
+        sim_backend().settle_ms(50);   // let the firmware render the injected data
         maybe_shot(argc, argv);
         emit("{\"ok\":true}", "posted snapshot");
         return 0;
