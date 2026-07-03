@@ -101,6 +101,20 @@ TEST_CASE("child lifecycle: spawn, capture stdout, orderly stop") {
     CHECK(!p.running());
 }
 
+TEST_CASE("spawning a missing binary fails synchronously and names the path") {
+    // Both libcs report exec failure from posix_spawn itself (glibc has done
+    // so since 2.26), so the contract is a false return with the offending
+    // path in the message - the ubuntu CI leg proves the glibc half. The
+    // qemu backend access()-checks resolved binaries first; this locks the
+    // reporting for direct callers.
+    QemuProcess p;
+    std::string err;
+    CHECK_FALSE(p.spawn_only({"/nonexistent/esprite-test-qemu-binary"}, &err));
+    CHECK_MESSAGE(err.find("/nonexistent/esprite-test-qemu-binary") != std::string::npos,
+                   "message does not name the path: ", err);
+    CHECK(!p.running());
+}
+
 TEST_CASE("stop before start is a safe no-op") {
     QemuProcess p;
     p.stop();

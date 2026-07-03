@@ -230,7 +230,9 @@ bool QemuProcess::spawn_only(const std::vector<std::string>& argv, std::string* 
     posix_spawn_file_actions_destroy(&actions);
 
     if (spawn_rc != 0) {
-        set_err(err, std::string("posix_spawn: ") + strerror(spawn_rc));
+        // Name the binary: "No such file or directory" alone is useless to a
+        // caller assembling the path from env vars.
+        set_err(err, "posix_spawn " + argv[0] + ": " + strerror(spawn_rc));
         close_if_open(in_pipe[0]);
         close_if_open(in_pipe[1]);
         close_if_open(out_pipe[0]);
