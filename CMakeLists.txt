@@ -194,11 +194,36 @@ endforeach()
 
 # Onboarded targets: board variants (which run a shared firmware) and standalone
 # apps. Each provides its own CMakeLists via add_subdirectory.
-foreach(_t waveshare_amoled_18 sample_gfx cyd cyd_tft qemu_esp32c3)
+foreach(_t waveshare_amoled_18 sample_gfx cyd cyd_tft)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/targets/${_t}/CMakeLists.txt)
         add_subdirectory(targets/${_t})
     endif()
 endforeach()
+
+# Qemu board specs are data (targets/qemu/*.json), embedded into the binary at
+# configure time so the shipped esprite stays a single file. ESPRITE_QEMU_BOARD
+# adds one user board at runtime without a rebuild. copy_if_different keeps an
+# unchanged generation from dirtying the build. extern on the definitions:
+# namespace-scope const has internal linkage in C++, and qemu_board.cpp must
+# see these across translation units.
+file(GLOB _qemu_board_json CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/targets/qemu/*.json)
+set(_qemu_boards_gen "${CMAKE_CURRENT_BINARY_DIR}/qemu_boards_gen.cpp")
+set(_gen_tmp "${_qemu_boards_gen}.tmp")
+file(WRITE ${_gen_tmp}
+    "// generated from targets/qemu/*.json - do not edit\n"
+    "extern const char* const kQemuBoardBuiltins[];\n"
+    "extern const int kQemuBoardBuiltinCount;\n"
+    "extern const char* const kQemuBoardBuiltins[] = {\n")
+list(LENGTH _qemu_board_json _qemu_board_count)
+foreach(_j ${_qemu_board_json})
+    file(READ ${_j} _json)
+    file(APPEND ${_gen_tmp} "R\"esprite_board(${_json})esprite_board\",\n")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_j})
+endforeach()
+file(APPEND ${_gen_tmp}
+    "nullptr};\n"
+    "extern const int kQemuBoardBuiltinCount = ${_qemu_board_count};\n")
+execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_gen_tmp} ${_qemu_boards_gen})
 
 # QEMU backend: a minimal blocking QMP client over a unix socket, a process
 # manager on top of it, and the SimBackend implementation that wires it into
@@ -207,6 +232,9 @@ add_library(qemu_backend STATIC
     backends/qemu/qmp.cpp
     backends/qemu/qemu_process.cpp
     backends/qemu/qemu_backend.cpp
+    backends/qemu/screendump.cpp
+    backends/qemu/qemu_board.cpp
+    ${_qemu_boards_gen}
 )
 target_include_directories(qemu_backend PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/backends/qemu)
 # ArduinoJson's optional Arduino String integration (ARDUINOJSON_ENABLE_ARDUINO_STRING,
@@ -217,7 +245,8 @@ target_include_directories(qemu_backend PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/shim
 # core: qemu_backend.cpp implements SimBackend and calls sim_backend_register
 # (core/backend.h, core/target.h). Core itself never links back against qemu
 # code, so the registration hook keeps that layering one-directional.
-target_link_libraries(qemu_backend PUBLIC ArduinoJson core)
+# peripherals: sync_framebuffer decodes screendumps into sim_framebuffer().
+target_link_libraries(qemu_backend PUBLIC ArduinoJson core peripherals)
 esprite_warnings(qemu_backend)
 
 # Shared CLI implementation, linked by both the binary and the test runner.
@@ -258,6 +287,9 @@ add_executable(sim_tests
     tests/test_backend.cpp
     tests/test_qmp.cpp
     tests/test_qemu_process.cpp
+    tests/test_qemu_screendump.cpp
+    tests/test_qemu_board.cpp
+    tests/test_qemu_display_gating.cpp
 )
 target_link_libraries(sim_tests PRIVATE cli_lib)
 link_sim_targets(sim_tests)

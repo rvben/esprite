@@ -37,3 +37,4 @@ void sim_settle_ms(unsigned ms, int max_steps) {
 }
 
 const SimTarget* sim_active_target() { return g_active; }
+void sim_set_active_target(const SimTarget* t) { g_active = t; }

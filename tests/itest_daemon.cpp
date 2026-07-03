@@ -1,5 +1,6 @@
 #include "doctest.h"
 #include "cli.h"
+#include "cli_test_helpers.h"   // run_daemon
 #include "framebuffer.h"
 #include <ArduinoJson.h>
 #include <cstdio>
@@ -10,21 +11,6 @@
 
 // Integration test for the `run` session (esprite_daemon) on an LVGL target.
 // Own executable so LVGL global state is clean (one sim_boot per process).
-
-static std::string run_daemon(const std::string& input) {
-    FILE* in = fmemopen((void*)input.data(), input.size(), "r");
-    char* buf = nullptr;
-    size_t len = 0;
-    FILE* out = open_memstream(&buf, &len);
-    REQUIRE(in != nullptr);
-    REQUIRE(out != nullptr);
-    esprite_daemon(in, out);
-    fclose(in);
-    fclose(out);
-    std::string reply(buf, len);
-    free(buf);
-    return reply;
-}
 
 // Number of distinct RGB565 values inside a framebuffer rect. A widget that was
 // actually painted shows several (track, indicator, text); a stale region that

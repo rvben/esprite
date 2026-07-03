@@ -1,0 +1,7 @@
+{
+  "key": "qemu_esp32c3",
+  "name": "QEMU ESP32-C3 (tier 1: serial only)",
+  "description": "Real flash image on Espressif QEMU (serial/logs/serve; image via ESPRITE_QEMU_IMAGE)",
+  "machine": "esp32c3",
+  "arch": "riscv32"
+}

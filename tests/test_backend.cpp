@@ -2,6 +2,7 @@
 #include "backend.h"
 #include "target.h"
 #include "qemu_backend.h"
+#include "qemu_board.h"
 
 TEST_CASE("native backend boots a target and exposes serial") {
     const SimTarget* t = sim_target("sample_gfx");
@@ -20,6 +21,11 @@ TEST_CASE("SimTarget defaults to the native backend") {
 }
 
 TEST_CASE("qemu_esp32c3 declares BACKEND_QEMU with an esp32c3/riscv32 machine spec") {
+    // Qemu targets are data-driven (targets/qemu/*.json): registered by
+    // qemu_boards_install, which esprite_main normally calls. Direct
+    // sim_target lookups need it too; idempotent across cases.
+    std::string board_err;
+    REQUIRE_MESSAGE(qemu_boards_install(&board_err), board_err);
     const SimTarget* t = sim_target("qemu_esp32c3");
     REQUIRE(t != nullptr);
     CHECK(t->backend == BACKEND_QEMU);
@@ -34,6 +40,8 @@ TEST_CASE("qemu_backend_install routes BACKEND_QEMU targets to the qemu backend"
     // silently falling back to native for an unregistered kind. Never calls
     // boot(), so this passes without a real qemu-system-<arch> binary on CI.
     qemu_backend_install();
+    std::string board_err;
+    REQUIRE_MESSAGE(qemu_boards_install(&board_err), board_err);
     const SimTarget* t = sim_target("qemu_esp32c3");
     REQUIRE(t != nullptr);
     sim_backend_select(t);

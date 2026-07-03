@@ -5,6 +5,7 @@
 #include "target.h"
 #include "backend.h"
 #include "qemu_backend.h"
+#include "qemu_board.h"
 #include "screenshot.h"
 #include "scenario.h"
 #include "sim_input.h"
@@ -112,8 +113,24 @@ static void install_signal_handlers() {
 // else assumes an in-process framebuffer/widget-tree/GPIO/BLE surface that no
 // qemu target has, so it is gated to `unsupported` before boot - no QEMU
 // process is ever spawned for a command this returns false for.
-static bool qemu_tier1_command(const std::string& cmd) {
-    return cmd == "serial" || cmd == "logs" || cmd == "quit" || cmd == "exit";
+// Commands a qemu-backed target supports. Tier 1 (any flash image): serial,
+// logs, and session control. Tier 2 (board spec declares a display, firmware
+// drives esp_lcd_qemu_rgb): adds screenshot; serve's --shot/--window follow
+// the same display rule in the serve path itself. Everything else stays
+// unsupported until its milestone lands (input in M2, HTTP snapshot in M3).
+static bool qemu_command_allowed(const std::string& cmd, const SimTarget* t) {
+    if (cmd == "serial" || cmd == "logs" || cmd == "quit" || cmd == "exit") return true;
+    bool has_display = t && t->board && t->board->width > 0 && t->board->height > 0;
+    if (cmd == "screenshot") return has_display;
+    return false;
+}
+
+// The unsupported-command message names what is actually missing: a display
+// in the board spec for screenshot, the tier-1 restriction otherwise.
+static std::string qemu_unsupported_msg(const std::string& cmd, const std::string& key) {
+    return "'" + cmd + "' is not supported on qemu-backed target '" + key + "'" +
+           (cmd == "screenshot" ? " (its board spec declares no display)"
+                                : " (serial/logs only)");
 }
 
 // Stamped by the build from the CMake project version: one source of truth
@@ -158,7 +175,7 @@ static const std::string kSchema = std::string(R"JSON({
         { "name": "text", "description": "Label text, when present.", "type": "string" },
         { "name": "value", "description": "Bar/arc value, when present.", "type": "number" }
       ] },
-    { "name": "screenshot", "description": "Boot, render, and write a PNG of the device screen.", "mutating": false, "stability": "stable",
+    { "name": "screenshot", "description": "Boot, render, and write a PNG of the device screen. Works on native targets and on qemu targets whose board spec declares a display (the firmware must drive esp_lcd_qemu_rgb; capture polls the guest panel via QMP screendump).", "mutating": false, "stability": "stable",
       "args": [ { "name": "out", "description": "Output PNG path (default esprite.png).", "type": "string", "required": false } ],
       "example": { "args": ["out.png", "--target", "waveshare_amoled_18"], "stdin": "" },
       "output_fields": [
@@ -233,7 +250,7 @@ static const std::string kSchema = std::string(R"JSON({
       "output_fields": [ { "name": "serial", "description": "Captured serial text.", "type": "string" } ] },
     { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless.", "mutating": true, "stability": "stable",
       "args": [ { "name": "file", "description": "Scenario JSON path.", "type": "string", "required": true } ] },
-    { "name": "serve", "description": "Boot and keep pumping so a live bridge can drive the device. HTTP: a bridge POSTs to the firmware's webserver (--port). BLE: --ble-port N exposes the virtual BLE link as newline-delimited JSON on a localhost TCP socket (connect = bonded central, lines in = host->device, device lines stream back; one client at a time). --window opens an interactive device-bezel window (mouse=touch, clickable board buttons with hover tooltips, ? for help, and a backtick-opened hardware panel with battery/USB/rotate controls on boards that have them). Human logs on stderr. On a qemu-backed target, serve only boots and pumps serial I/O until interrupted: there is no framebuffer, HTTP webserver, or native BLE link, so --shot, --window, and --ble-port are all rejected as unsupported (see the backend field on list-targets).", "mutating": true, "stability": "stable" },
+    { "name": "serve", "description": "Boot and keep pumping so a live bridge can drive the device. HTTP: a bridge POSTs to the firmware's webserver (--port). BLE: --ble-port N exposes the virtual BLE link as newline-delimited JSON on a localhost TCP socket (connect = bonded central, lines in = host->device, device lines stream back; one client at a time). --window opens an interactive device-bezel window (mouse=touch, clickable board buttons with hover tooltips, ? for help, and a backtick-opened hardware panel with battery/USB/rotate controls on boards that have them). Human logs on stderr. On a qemu-backed target, serve boots and pumps serial I/O until interrupted; there is no HTTP webserver or native BLE link, so --ble-port is rejected as unsupported. When the qemu target's board spec declares a display, --shot and --window mirror the guest panel via QMP screendump (10 Hz for the window); on a display-less qemu target they are rejected as unsupported (see the backend field on list-targets).", "mutating": true, "stability": "stable" },
     { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), swipe (x1,y1,x2,y2), expect (text/absent/match), button, battery, rotate, motion, gpio, wifi, ble (sub+data/passkey), snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
   ],
   "errors": [
@@ -243,10 +260,11 @@ static const std::string kSchema = std::string(R"JSON({
     { "kind": "ref_not_found", "description": "tap --ref referenced a widget not in the current ui snapshot.", "exit_code": 4 },
     { "kind": "conflict", "description": "An argument or option conflicts with another (e.g. tap given both --ref and x/y).", "exit_code": 5 },
     { "kind": "post_failed", "description": "snapshot could not be delivered to the running target (connect failed or body exceeds the server read size).", "exit_code": 6 },
-    { "kind": "unsupported", "description": "The command targets a capability the active board lacks (e.g. battery/rotate on a board without it, or a button the board does not have), or a non-tier-1 command (anything but serial/logs/serve) on a qemu-backed target.", "exit_code": 7 },
+    { "kind": "unsupported", "description": "The command targets a capability the active board lacks (e.g. battery/rotate on a board without it, or a button the board does not have), or a command outside a qemu target's tier (tier 1: serial/logs/serve; screenshot and serve --shot/--window additionally need a display in the board spec).", "exit_code": 7 },
     { "kind": "bad_args", "description": "Missing or invalid arguments for the command.", "exit_code": 2 },
     { "kind": "expect_failed", "description": "A scenario/run 'expect' assertion did not hold (text present/absent mismatch).", "exit_code": 8 },
-    { "kind": "backend_unavailable", "description": "A qemu-backed target could not boot: no qemu-system-<arch> binary configured (set ESPRITE_QEMU_BIN, or ESPRITE_QEMU_RISCV32/ESPRITE_QEMU_XTENSA per the target's architecture), ESPRITE_QEMU_IMAGE unset or not found (the flash image path), or the child process failed to spawn or never reached a running QMP state. Also covers 'serial send' failing against a qemu-backed target whose child has exited or closed its stdin pipe.", "exit_code": 2 }
+    { "kind": "backend_unavailable", "description": "A qemu-backed target could not boot: no qemu-system-<arch> binary configured (set ESPRITE_QEMU_BIN, or ESPRITE_QEMU_RISCV32/ESPRITE_QEMU_XTENSA per the target's architecture), ESPRITE_QEMU_IMAGE unset or not found (the flash image path), or the child process failed to spawn or never reached a running QMP state. Also covers 'serial send' failing against a qemu-backed target whose child has exited or closed its stdin pipe.", "exit_code": 2 },
+    { "kind": "capture_failed", "description": "A display capture failed after boot: the qemu screendump command errored, wrote no file, or produced an undecodable image. The framebuffer keeps its previous content.", "exit_code": 9 }
   ]
 })JSON";
 
@@ -410,6 +428,13 @@ int esprite_main(int argc, char** argv) {
     g_interrupted = 0;         // each invocation starts fresh; tests call this repeatedly in-process
     install_signal_handlers(); // before qemu_backend_install: a qemu boot's wait loops must see g_interrupted
     qemu_backend_install(sim_interrupted);   // core never links qemu code directly; this is the one wiring point
+    {
+        // Register the data-driven qemu targets (embedded targets/qemu/*.json
+        // plus an optional ESPRITE_QEMU_BOARD user file) before any target
+        // resolution. Idempotent across repeated in-process calls.
+        std::string board_err;
+        if (!qemu_boards_install(&board_err)) return fail("bad_args", board_err, 2);
+    }
     BackendShutdownGuard backend_guard;
     set_output_mode(argc, argv);
     if (argc < 2 || !strcmp(argv[1], "--help") || !strcmp(argv[1], "help")) {
@@ -486,13 +511,17 @@ int esprite_main(int argc, char** argv) {
         const SimTarget* target = sim_target(t);
         if (!target) return fail("unknown_target", "unknown target '" + t + "'", 2);
         bool is_qemu = target->backend == BACKEND_QEMU;
-        // A qemu target has no in-process framebuffer, window, or BLE link to
-        // serve - reject before boot so no QEMU process is ever spawned for a
-        // request this can never satisfy.
-        if (is_qemu && opt_val(argc, argv, "--shot"))
-            return fail("unsupported", "--shot needs a framebuffer; '" + t + "' boots via qemu", 7);
-        if (is_qemu && opt_flag(argc, argv, "--window"))
-            return fail("unsupported", "--window needs a framebuffer; '" + t + "' boots via qemu", 7);
+        bool qemu_display = is_qemu && target->board &&
+                            target->board->width > 0 && target->board->height > 0;
+        // Display options need pixels: native targets always have them, qemu
+        // targets only when the board spec declares a display (tier 2,
+        // esp_lcd_qemu_rgb-cooperating firmware). BLE stays native-only.
+        // Reject before boot so no QEMU process is ever spawned for a request
+        // this can never satisfy.
+        if (is_qemu && !qemu_display && opt_val(argc, argv, "--shot"))
+            return fail("unsupported", "--shot needs a display; '" + t + "' declares none in its board spec", 7);
+        if (is_qemu && !qemu_display && opt_flag(argc, argv, "--window"))
+            return fail("unsupported", "--window needs a display; '" + t + "' declares none in its board spec", 7);
         if (is_qemu && opt_val(argc, argv, "--ble-port"))
             return fail("unsupported", "--ble-port needs the native BLE link; '" + t + "' boots via qemu", 7);
         sim_backend_select(target);
@@ -511,6 +540,19 @@ int esprite_main(int argc, char** argv) {
         int interval = 1000;
         if (const char* iv = opt_val(argc, argv, "--interval-ms")) interval = atoi(iv);
 
+        if (qemu_display) {
+            // Size the framebuffer from the board spec so the window never
+            // textures a zero-sized buffer, then try one capture; a firmware
+            // that has not drawn yet just leaves it black.
+            if (sim_framebuffer().w() != target->board->width ||
+                sim_framebuffer().h() != target->board->height) {
+                sim_framebuffer().init(target->board->width, target->board->height);
+                sim_framebuffer().fill(0);
+            }
+            std::string sync_err;
+            sim_backend().sync_framebuffer(&sync_err);
+        }
+
         bool want_window = opt_flag(argc, argv, "--window");
 #ifdef HAVE_SDL2
         SimWindow* win = nullptr;
@@ -528,8 +570,8 @@ int esprite_main(int argc, char** argv) {
 #endif
 
         if (is_qemu) {
-            fprintf(stderr, "esprite: serving '%s' via qemu (serial/logs only; no HTTP snapshot)\n",
-                    t.c_str());
+            fprintf(stderr, "esprite: serving '%s' via qemu (%s; no HTTP snapshot)\n",
+                    t.c_str(), qemu_display ? "serial/logs/display" : "serial/logs only");
         } else {
             // Report the port the target actually bound (matters when --port 0
             // asked the OS for an ephemeral port), not the raw requested value.
@@ -561,12 +603,24 @@ int esprite_main(int argc, char** argv) {
         // an interrupted boot above would have already returned
         // backend_unavailable instead of reaching this loop.
         auto last = std::chrono::steady_clock::now();
+        auto last_sync = last;
         while (!sim_interrupted()) {
             sim_backend().tick();          // pump handleClient() so POSTs land
             ble_bridge_tick(ble);          // null-safe: shuttle BLE lines
             bool paced = false;
 #ifdef HAVE_SDL2
             if (win) {
+                // A qemu display refreshes by polling screendump: 10 Hz is
+                // fluid enough for a live window and costs one small QMP
+                // round trip; a transient failure just skips a frame.
+                if (qemu_display) {
+                    auto now_sync = std::chrono::steady_clock::now();
+                    if (std::chrono::duration_cast<std::chrono::milliseconds>(now_sync - last_sync).count() >= 100) {
+                        std::string sync_err;
+                        sim_backend().sync_framebuffer(&sync_err);
+                        last_sync = now_sync;
+                    }
+                }
                 if (!sim_window_tick(win)) break;   // window closed / Escape
                 paced = true;                        // vsync paces the frame
             }
@@ -575,6 +629,10 @@ int esprite_main(int argc, char** argv) {
             if (shot) {
                 auto now = std::chrono::steady_clock::now();
                 if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last).count() >= interval) {
+                    // Sync-then-capture, one code path for both backends
+                    // (native sync is a no-op).
+                    std::string sync_err;
+                    sim_backend().sync_framebuffer(&sync_err);
 #ifdef HAVE_SDL2
                     if (win) sim_window_request_capture(win, shot);   // full window (with buttons)
                     else
@@ -606,8 +664,8 @@ int esprite_main(int argc, char** argv) {
     {
         std::string rt = resolve_target(argc, argv);
         if (const SimTarget* rtarget = rt.empty() ? nullptr : sim_target(rt))
-            if (rtarget->backend == BACKEND_QEMU && !qemu_tier1_command(cmd))
-                return fail("unsupported", "'" + cmd + "' is not supported on qemu-backed target '" + rt + "' (serial/logs only)", 7);
+            if (rtarget->backend == BACKEND_QEMU && !qemu_command_allowed(cmd, rtarget))
+                return fail("unsupported", qemu_unsupported_msg(cmd, rt), 7);
     }
     if (boot_or_die(argc, argv) != 0) return 2;
 
@@ -623,7 +681,18 @@ int esprite_main(int argc, char** argv) {
     if (cmd == "screenshot") {
         std::string out = positional(argc, argv, 0);
         if (out.empty()) out = "esprite.png";
-        if (const char* s = opt_val(argc, argv, "--steps")) sim_run_steps(atoi(s));
+        const SimTarget* at = sim_active_target();
+        bool qemu_active = at && at->backend == BACKEND_QEMU;
+        if (const char* s = opt_val(argc, argv, "--steps")) {
+            if (qemu_active)
+                return fail("unsupported", "--steps is native-only (loop iterations); qemu targets capture current display state", 7);
+            sim_run_steps(atoi(s));
+        }
+        // Always sync: the native backend's sync is a successful no-op, so
+        // one code path serves both backends.
+        std::string sync_err;
+        if (!sim_backend().sync_framebuffer(&sync_err))
+            return fail("capture_failed", "could not capture the display: " + sync_err, 9);
         bool ok = sim_screenshot_png(out.c_str());
         int w = sim_framebuffer().w(), h = sim_framebuffer().h();
         emit("{\"ok\":" + std::string(jbool(ok)) + ",\"path\":\"" + json_esc(out) + "\",\"w\":" +
@@ -864,6 +933,12 @@ int esprite_daemon(FILE* in, FILE* out) {
     g_interrupted = 0;
     install_signal_handlers();
     qemu_backend_install(sim_interrupted);
+    {
+        // Same data-driven qemu target registration as esprite_main, for
+        // direct esprite_daemon callers (tests); idempotent.
+        std::string board_err;
+        if (!qemu_boards_install(&board_err)) return fail("bad_args", board_err, 2);
+    }
     BackendShutdownGuard backend_guard;   // tests call esprite_daemon directly, bypassing esprite_main
     char line[16384];
     bool booted = false;
@@ -938,16 +1013,22 @@ int esprite_daemon(FILE* in, FILE* out) {
             break;
         } else if (!booted) {
             session_err(out, "not_booted", "boot a target first");
-        } else if (is_qemu && !qemu_tier1_command(cmd)) {
-            session_err(out, "unsupported", "'" + cmd + "' is not supported on a qemu-backed target (serial/logs only)");
+        } else if (is_qemu && !qemu_command_allowed(cmd, sim_active_target())) {
+            session_err(out, "unsupported",
+                        qemu_unsupported_msg(cmd, sim_active_target() ? sim_active_target()->key : ""));
         } else if (cmd == "ui") {
             fprintf(out, "%s\n", lvgl_snapshot_json().c_str());
         } else if (cmd == "screenshot") {
             const char* path = doc["out"] | "esprite.png";
             sim_settle_ms();   // capture a settled frame, whatever ran before
-            bool ok = sim_screenshot_png(path);
-            fprintf(out, "{\"ok\":%s,\"path\":\"%s\",\"w\":%d,\"h\":%d}\n",
-                    jbool(ok), json_esc(path).c_str(), sim_framebuffer().w(), sim_framebuffer().h());
+            std::string sync_err;
+            if (!sim_backend().sync_framebuffer(&sync_err)) {
+                session_err(out, "capture_failed", "could not capture the display: " + sync_err);
+            } else {
+                bool ok = sim_screenshot_png(path);
+                fprintf(out, "{\"ok\":%s,\"path\":\"%s\",\"w\":%d,\"h\":%d}\n",
+                        jbool(ok), json_esc(path).c_str(), sim_framebuffer().w(), sim_framebuffer().h());
+            }
         } else if (cmd == "tap") {
             int x, y;
             if (doc["ref"].is<const char*>()) {

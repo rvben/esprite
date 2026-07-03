@@ -1,14 +1,19 @@
 #include "qemu_backend.h"
 #include "backend.h"
 #include "target.h"
+#include "runtime.h"
 #include "qemu_process.h"
+#include "screendump.h"
+#include "framebuffer.h"
 #include <ArduinoJson.h>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cerrno>
 #include <cctype>
 #include <unistd.h>
+#include <vector>
 
 namespace {
 
@@ -153,6 +158,9 @@ struct QemuBackend : SimBackend {
             shutdown();
             return false;
         }
+        // Record the booted target so capability gates and board lookups
+        // (sim_active_target) work exactly as after a native sim_boot.
+        sim_set_active_target(t);
         return true;
     }
 
@@ -182,6 +190,46 @@ struct QemuBackend : SimBackend {
 
     bool serial_inject(const std::string& data) override { return process_.serial_write(data); }
 
+    // Tier-2 display capture: QMP screendump writes a P6 PPM into this boot's
+    // scratch dir (the guest-visible esp_rgb console content), which is
+    // decoded into sim_framebuffer(). The dump's dimensions are authoritative
+    // (the guest configures the panel size). Each dump also pumps the
+    // device's console refresh, which is what releases a guest blocked in
+    // esp_lcd_qemu_rgb's frame-consumed busy-wait.
+    bool sync_framebuffer(std::string* err) override {
+        if (socket_dir_.empty() || !process_.running()) {
+            set_err(err, "no running qemu child");
+            return false;
+        }
+        // Path comes from mkdtemp plus a fixed suffix: no characters needing
+        // JSON escaping can appear in it.
+        std::string path = socket_dir_ + "/screen.ppm";
+        std::string result, qerr;
+        if (!process_.qmp.execute("screendump", "{\"filename\":\"" + path + "\"}",
+                                  &result, &qerr)) {
+            set_err(err, "screendump failed: " + qerr);
+            return false;
+        }
+        FILE* f = fopen(path.c_str(), "rb");
+        if (!f) {
+            set_err(err, "screendump wrote no file at " + path);
+            return false;
+        }
+        std::string ppm;
+        char buf[65536];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), f)) > 0) ppm.append(buf, n);
+        fclose(f);
+        unlink(path.c_str());
+        int w = 0, h = 0;
+        std::vector<uint16_t> px;
+        if (!ppm_decode_rgb565(ppm, &w, &h, &px, err)) return false;
+        Framebuffer& fb = sim_framebuffer();
+        if (fb.w() != w || fb.h() != h) fb.init(w, h);
+        fb.blit(0, 0, w, h, px.data());
+        return true;
+    }
+
     const char* name() const override { return "qemu"; }
 
     void set_interrupt_check(bool (*fn)()) { interrupted_ = fn; }
@@ -192,6 +240,7 @@ private:
     void cleanup_dir() {
         if (socket_dir_.empty()) return;
         unlink((socket_dir_ + "/qmp.sock").c_str());
+        unlink((socket_dir_ + "/screen.ppm").c_str());
         rmdir(socket_dir_.c_str());
         socket_dir_.clear();
     }

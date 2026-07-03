@@ -1,0 +1,5 @@
+# The esp_lcd_qemu_rgb driver busy-waits for the host console to consume each
+# frame; headless that wait lasts until the next screendump and would starve
+# the IDLE task into task-watchdog serial spam. The fixture has no other
+# watchdog-worthy work, so disable it.
+CONFIG_ESP_TASK_WDT_INIT=n

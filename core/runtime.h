@@ -20,6 +20,12 @@ void sim_settle_ms(unsigned ms = 50, int max_steps = 400);
 
 const SimTarget* sim_active_target();
 
+// Record the active target without the in-process boot sequence. sim_boot
+// sets it for native targets; a backend that boots out of process (qemu)
+// calls this on success so capability gates and board lookups see the booted
+// target either way. Safe for targets with no setup/loop: sim_step guards.
+void sim_set_active_target(const SimTarget* t);
+
 // Register a callback invoked at the start of every sim_boot(), so subsystems
 // (e.g. the LVGL snapshot ref map) can reset their per-session state on the
 // common boot path regardless of how boot was reached.

@@ -46,3 +46,22 @@ inline int run_cli_err(std::initializer_list<const char*> args, std::string* err
 inline int run_cli_out(std::initializer_list<const char*> args, std::string* out) {
     return run_cli_capture(args, stdout, out);
 }
+
+// Drive one full `run` session (esprite_daemon) in-process: newline-delimited
+// JSON commands in, the concatenated reply lines back. In-process matters:
+// tests can inspect sim state (e.g. sim_framebuffer()) the session left
+// behind after it returns.
+inline std::string run_daemon(const std::string& input) {
+    FILE* in = fmemopen((void*)input.data(), input.size(), "r");
+    char* buf = nullptr;
+    size_t len = 0;
+    FILE* out = open_memstream(&buf, &len);
+    REQUIRE(in != nullptr);
+    REQUIRE(out != nullptr);
+    esprite_daemon(in, out);
+    fclose(in);
+    fclose(out);
+    std::string reply(buf, len);
+    free(buf);
+    return reply;
+}
