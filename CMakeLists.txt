@@ -194,7 +194,7 @@ endforeach()
 
 # Onboarded targets: board variants (which run a shared firmware) and standalone
 # apps. Each provides its own CMakeLists via add_subdirectory.
-foreach(_t waveshare_amoled_18 sample_gfx cyd cyd_tft qemu_esp32c3)
+foreach(_t waveshare_amoled_18 sample_gfx cyd cyd_tft)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/targets/${_t}/CMakeLists.txt)
         add_subdirectory(targets/${_t})
     endif()
@@ -203,18 +203,27 @@ endforeach()
 # Qemu board specs are data (targets/qemu/*.json), embedded into the binary at
 # configure time so the shipped esprite stays a single file. ESPRITE_QEMU_BOARD
 # adds one user board at runtime without a rebuild. copy_if_different keeps an
-# unchanged generation from dirtying the build.
+# unchanged generation from dirtying the build. extern on the definitions:
+# namespace-scope const has internal linkage in C++, and qemu_board.cpp must
+# see these across translation units.
+file(GLOB _qemu_board_json CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/targets/qemu/*.json)
 set(_qemu_boards_gen "${CMAKE_CURRENT_BINARY_DIR}/qemu_boards_gen.cpp")
-# extern on the definitions: namespace-scope const has internal linkage in
-# C++, and qemu_board.cpp must see these across translation units.
-file(WRITE "${_qemu_boards_gen}.tmp"
-    "// generated - do not edit\n"
+set(_gen_tmp "${_qemu_boards_gen}.tmp")
+file(WRITE ${_gen_tmp}
+    "// generated from targets/qemu/*.json - do not edit\n"
     "extern const char* const kQemuBoardBuiltins[];\n"
     "extern const int kQemuBoardBuiltinCount;\n"
-    "extern const char* const kQemuBoardBuiltins[] = {nullptr};\n"
-    "extern const int kQemuBoardBuiltinCount = 0;\n")
-execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    "${_qemu_boards_gen}.tmp" "${_qemu_boards_gen}")
+    "extern const char* const kQemuBoardBuiltins[] = {\n")
+list(LENGTH _qemu_board_json _qemu_board_count)
+foreach(_j ${_qemu_board_json})
+    file(READ ${_j} _json)
+    file(APPEND ${_gen_tmp} "R\"esprite_board(${_json})esprite_board\",\n")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_j})
+endforeach()
+file(APPEND ${_gen_tmp}
+    "nullptr};\n"
+    "extern const int kQemuBoardBuiltinCount = ${_qemu_board_count};\n")
+execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_gen_tmp} ${_qemu_boards_gen})
 
 # QEMU backend: a minimal blocking QMP client over a unix socket, a process
 # manager on top of it, and the SimBackend implementation that wires it into

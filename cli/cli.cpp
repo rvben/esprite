@@ -5,6 +5,7 @@
 #include "target.h"
 #include "backend.h"
 #include "qemu_backend.h"
+#include "qemu_board.h"
 #include "screenshot.h"
 #include "scenario.h"
 #include "sim_input.h"
@@ -410,6 +411,13 @@ int esprite_main(int argc, char** argv) {
     g_interrupted = 0;         // each invocation starts fresh; tests call this repeatedly in-process
     install_signal_handlers(); // before qemu_backend_install: a qemu boot's wait loops must see g_interrupted
     qemu_backend_install(sim_interrupted);   // core never links qemu code directly; this is the one wiring point
+    {
+        // Register the data-driven qemu targets (embedded targets/qemu/*.json
+        // plus an optional ESPRITE_QEMU_BOARD user file) before any target
+        // resolution. Idempotent across repeated in-process calls.
+        std::string board_err;
+        if (!qemu_boards_install(&board_err)) return fail("bad_args", board_err, 2);
+    }
     BackendShutdownGuard backend_guard;
     set_output_mode(argc, argv);
     if (argc < 2 || !strcmp(argv[1], "--help") || !strcmp(argv[1], "help")) {
@@ -864,6 +872,12 @@ int esprite_daemon(FILE* in, FILE* out) {
     g_interrupted = 0;
     install_signal_handlers();
     qemu_backend_install(sim_interrupted);
+    {
+        // Same data-driven qemu target registration as esprite_main, for
+        // direct esprite_daemon callers (tests); idempotent.
+        std::string board_err;
+        if (!qemu_boards_install(&board_err)) return fail("bad_args", board_err, 2);
+    }
     BackendShutdownGuard backend_guard;   // tests call esprite_daemon directly, bypassing esprite_main
     char line[16384];
     bool booted = false;
