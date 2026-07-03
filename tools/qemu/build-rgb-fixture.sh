@@ -6,9 +6,16 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 out="$PWD/tests/fixtures/qemu" && mkdir -p "$out"
 
+# Digest-pinned: a silent upstream rebuild of the release-v5.4 tag could
+# change fixture bytes (and golden stability) underneath us. Bump with:
+#   docker buildx imagetools inspect espressif/idf:release-v5.4
+# then regenerate fixtures + goldens and eyeball them. The CI fixture cache
+# keys on this script's hash, so a pin bump rebuilds the cache automatically.
+IDF_IMAGE="espressif/idf:release-v5.4@sha256:6cd8af13969cacaacf3d88eed9282710fa41af7237a448a1626833ce56ff2669"
+
 docker run --rm -v "$PWD/tools/qemu/rgb_demo":/proj_demo:ro \
   -v "$PWD/tools/qemu/esprite_qemu_agent":/proj_agent:ro -v "$out":/out \
-  espressif/idf:release-v5.4 bash -ec '
+  "$IDF_IMAGE" bash -ec '
   cp -r /proj_demo /tmp/rgb && cp -r /proj_agent /tmp/esprite_qemu_agent
   cd /tmp/rgb
   idf.py set-target esp32c3 build

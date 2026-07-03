@@ -4,8 +4,11 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 out="$PWD/tests/fixtures/qemu" && mkdir -p "$out"
 
+# Digest-pinned (same pin and bump procedure as build-rgb-fixture.sh).
+IDF_IMAGE="espressif/idf:release-v5.4@sha256:6cd8af13969cacaacf3d88eed9282710fa41af7237a448a1626833ce56ff2669"
+
 # 1) ESP-IDF hello_world for ESP32-C3, merged to one 4MB flash image.
-docker run --rm -v "$out":/out espressif/idf:release-v5.4 bash -ec '
+docker run --rm -v "$out":/out "$IDF_IMAGE" bash -ec '
   cp -r "$IDF_PATH/examples/get-started/hello_world" /tmp/hw && cd /tmp/hw
   idf.py set-target esp32c3 build
   cd build
