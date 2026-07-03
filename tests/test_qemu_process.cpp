@@ -10,7 +10,7 @@ TEST_CASE("qemu argv is exact with icount") {
     auto v = qemu_build_argv(s);
     std::vector<std::string> want = {
         "/q/qemu-system-riscv32", "-machine", "esp32c3", "-nographic",
-        "-drive", "file=/f/flash.bin,if=mtd,format=raw",
+        "-drive", "file=/f/flash.bin,if=mtd,format=raw,snapshot=on",
         "-qmp", "unix:/tmp/q.sock,server=on,wait=off",
         "-icount", "shift=3,align=off,sleep=off"};
     CHECK(v == want);
@@ -21,7 +21,7 @@ TEST_CASE("qemu argv omits -icount when spec.icount is false") {
     auto v = qemu_build_argv(s);
     std::vector<std::string> want = {
         "/q/qemu-system-riscv32", "-machine", "esp32c3", "-nographic",
-        "-drive", "file=/f/flash.bin,if=mtd,format=raw",
+        "-drive", "file=/f/flash.bin,if=mtd,format=raw,snapshot=on",
         "-qmp", "unix:/tmp/q.sock,server=on,wait=off"};
     CHECK(v == want);
 }
@@ -36,7 +36,7 @@ TEST_CASE("qemu argv wires the agent chardev to UART1 and keeps the console on s
         "/q/qemu-system-riscv32", "-machine", "esp32c3", "-nographic",
         "-serial", "mon:stdio",
         "-serial", "unix:/tmp/agent.sock,server=on,wait=off",
-        "-drive", "file=/f/flash.bin,if=mtd,format=raw",
+        "-drive", "file=/f/flash.bin,if=mtd,format=raw,snapshot=on",
         "-qmp", "unix:/tmp/q.sock,server=on,wait=off"};
     CHECK(v == want);
 }
@@ -48,7 +48,7 @@ TEST_CASE("qemu argv adds user-net hostfwd for http-capable boards") {
     auto v = qemu_build_argv(s);
     std::vector<std::string> want = {
         "/q/qemu-system-riscv32", "-machine", "esp32c3", "-nographic",
-        "-drive", "file=/f/flash.bin,if=mtd,format=raw",
+        "-drive", "file=/f/flash.bin,if=mtd,format=raw,snapshot=on",
         "-qmp", "unix:/tmp/q.sock,server=on,wait=off",
         "-nic", "user,model=open_eth,hostfwd=tcp:127.0.0.1:18080-:80"};
     CHECK(v == want);

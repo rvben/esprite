@@ -101,7 +101,11 @@ std::vector<std::string> qemu_build_argv(const QemuSpec& spec) {
                                  "-serial", "unix:" + spec.agent_socket + ",server=on,wait=off"});
     }
     argv.insert(argv.end(), {
-        "-drive", "file=" + spec.flash_image + ",if=mtd,format=raw",
+        // snapshot=on: guest flash writes land in a throwaway overlay, so a
+        // boot never mutates the user's image file and a read-only image
+        // (e.g. a root-owned CI cache artifact) still boots - QEMU otherwise
+        // opens mtd drives for writing.
+        "-drive", "file=" + spec.flash_image + ",if=mtd,format=raw,snapshot=on",
         "-qmp", "unix:" + spec.qmp_socket + ",server=on,wait=off",
     });
     if (spec.http_host_port > 0 && spec.http_guest_port > 0) {
