@@ -1,6 +1,7 @@
 #include "qemu_backend.h"
 #include "backend.h"
 #include "target.h"
+#include "runtime.h"
 #include "qemu_process.h"
 #include "screendump.h"
 #include "framebuffer.h"
@@ -157,6 +158,9 @@ struct QemuBackend : SimBackend {
             shutdown();
             return false;
         }
+        // Record the booted target so capability gates and board lookups
+        // (sim_active_target) work exactly as after a native sim_boot.
+        sim_set_active_target(t);
         return true;
     }
 
