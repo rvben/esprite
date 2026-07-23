@@ -10,6 +10,20 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
+# When esprite is pulled into another project via FetchContent/add_subdirectory
+# it contributes only its libraries + helper functions. The executable, its
+# install rule, the tests, and the built-in demo/agentgauge targets build only
+# for a standalone (top-level) configure. A consumer must NOT drag in the demo
+# targets, or its runner would be multi-target and --target-less commands would
+# not resolve.
+if(NOT DEFINED ESPRITE_BUILD_STANDALONE)
+    if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+        set(ESPRITE_BUILD_STANDALONE ON)
+    else()
+        set(ESPRITE_BUILD_STANDALONE OFF)
+    endif()
+endif()
+
 # Warnings for the sim's own code. Never applied to third-party builds (LVGL)
 # or to the read-only firmware sources compiled into <fw>_fw libraries.
 function(esprite_warnings target)
@@ -184,21 +198,50 @@ function(link_sim_targets exe)
     endforeach()
 endfunction()
 
+# Public namespaced alias for consumers. Same contract as add_sim_target:
+# esprite_add_sim_target(<name> <sources...>).
+function(esprite_add_sim_target name)
+    add_sim_target(${name} ${ARGN})
+endfunction()
+
+# Build a standalone runner executable for a single onboarded target: the full
+# esprite CLI (cli/main.cpp + cli_lib) with exactly that target force-loaded.
+# Consumers call this instead of relying on the global SIM_TARGET_LIBS list, so
+# a per-project runner contains only its own target.
+function(esprite_add_runner exe)
+    cmake_parse_arguments(R "" "TARGET" "" ${ARGN})
+    add_executable(${exe} ${esprite_SOURCE_DIR}/cli/main.cpp)
+    target_link_libraries(${exe} PRIVATE cli_lib)
+    if(APPLE)
+        target_link_libraries(${exe} PRIVATE target_${R_TARGET})
+        target_link_options(${exe} PRIVATE
+            "-Wl,-force_load,$<TARGET_FILE:target_${R_TARGET}>")
+    else()
+        target_link_libraries(${exe} PRIVATE
+            "-Wl,--whole-archive" target_${R_TARGET} "-Wl,--no-whole-archive")
+    endif()
+endfunction()
+
 # Shared firmwares, compiled once (a firmware is board-agnostic; board targets
 # below select the panel). Added before the board targets that reference them.
+# Standalone only: a consumer brings its own firmware, not esprite's demos.
+if(ESPRITE_BUILD_STANDALONE)
 foreach(_fw agentgauge)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/firmwares/${_fw}/CMakeLists.txt)
         add_subdirectory(firmwares/${_fw})
     endif()
 endforeach()
+endif()
 
 # Onboarded targets: board variants (which run a shared firmware) and standalone
-# apps. Each provides its own CMakeLists via add_subdirectory.
+# apps. Each provides its own CMakeLists via add_subdirectory. Standalone only.
+if(ESPRITE_BUILD_STANDALONE)
 foreach(_t waveshare_amoled_18 sample_gfx cyd cyd_tft)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/targets/${_t}/CMakeLists.txt)
         add_subdirectory(targets/${_t})
     endif()
 endforeach()
+endif()
 
 # Qemu board specs are data (targets/qemu/*.json), embedded into the binary at
 # configure time so the shipped esprite stays a single file. ESPRITE_QEMU_BOARD
@@ -259,6 +302,10 @@ esprite_warnings(cli_lib)
 if(SDL2_FOUND)
     target_link_libraries(cli_lib PUBLIC sim_window)   # propagates HAVE_SDL2
 endif()
+
+# The esprite CLI executable, its install rule, and all tests build only for a
+# standalone configure. A consumer builds its own runner via esprite_add_runner.
+if(ESPRITE_BUILD_STANDALONE)
 
 add_executable(esprite cli/main.cpp)
 target_link_libraries(esprite PRIVATE cli_lib)
@@ -358,3 +405,5 @@ if(TARGET sim_itests_daemon)
     add_test(NAME sim_itests_ui COMMAND sim_itests_ui)
 endif()
 add_test(NAME sim_itests_qemu COMMAND sim_itests_qemu)
+
+endif()  # ESPRITE_BUILD_STANDALONE

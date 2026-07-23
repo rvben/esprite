@@ -11,7 +11,7 @@ ifdef AGENTGAUGE_SRC
 CMAKE_ARGS += -DAGENTGAUGE_SRC=$(AGENTGAUGE_SRC)
 endif
 
-.PHONY: configure build test screenshot scenario goldens release install dist clean qemu-fetch qemu-fixtures qemu-test qemu-goldens
+.PHONY: configure build test consumer-test screenshot scenario goldens release install dist clean qemu-fetch qemu-fixtures qemu-test qemu-goldens
 
 configure:
 	cmake -S . -B $(BUILD) $(CMAKE_ARGS)
@@ -44,6 +44,11 @@ dist: release
 # Unit tests (sim_tests) and target integration tests (sim_itests).
 test: build
 	ctest --test-dir $(BUILD) --output-on-failure --timeout 90
+
+# Build a throwaway consumer project that FetchContents esprite and produces a
+# per-project runner, proving esprite is consumable as a dependency.
+consumer-test:
+	bash tests/fixtures/consumer/run_consumer_build.sh
 
 # One-shot screenshot of a target: make screenshot TARGET=sample_gfx
 screenshot: build
