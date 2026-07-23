@@ -4,6 +4,13 @@ bool win_rect_contains(const WinRect& r, int x, int y) {
     return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
 
+int sim_button_gpio_level(const SimButton& b, bool pressed) {
+    // Matches the `button` command's polarity (cli/actions.cpp): pressed drives
+    // active_low ? 0 : 1; released is the complement.
+    if (b.active_low) return pressed ? 0 : 1;
+    return pressed ? 1 : 0;
+}
+
 namespace {
 
 WinRect inflate(const WinRect& r, int by) {

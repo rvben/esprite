@@ -3,6 +3,16 @@
 #include "target.h"
 #include <cstdlib>  // std::abs
 
+TEST_CASE("sim_button_gpio_level honors active_low") {
+    SimButton hi{}; hi.action = ACT_GPIO; hi.gpio = 4; hi.active_low = false;
+    CHECK(sim_button_gpio_level(hi, /*pressed=*/true)  == 1);
+    CHECK(sim_button_gpio_level(hi, /*pressed=*/false) == 0);
+
+    SimButton lo{}; lo.action = ACT_GPIO; lo.gpio = 9; lo.active_low = true;
+    CHECK(sim_button_gpio_level(lo, /*pressed=*/true)  == 0);
+    CHECK(sim_button_gpio_level(lo, /*pressed=*/false) == 1);
+}
+
 namespace {
 
 // Mirrors the waveshare_amoled_18 board's real button declaration (three

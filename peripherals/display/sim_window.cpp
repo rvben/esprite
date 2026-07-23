@@ -219,7 +219,7 @@ static void press_action(SimWindow* win, const SimButton* b) {
     switch (b->action) {
     case ACT_PRIMARY:   sim_input().button[0] = true; break;
     case ACT_SECONDARY: sim_input().button[1] = true; break;
-    case ACT_GPIO:      sim_gpio_set(b->gpio, 1); break;
+    case ACT_GPIO:      sim_gpio_set(b->gpio, sim_button_gpio_level(*b, true)); break;
     case ACT_PWR:
         win->pwr_down_at = SDL_GetTicks();
         win->pwr_long_sent = false;
@@ -231,7 +231,7 @@ static void release_action(SimWindow* win, const SimButton* b) {
     switch (b->action) {
     case ACT_PRIMARY:   sim_input().button[0] = false; break;
     case ACT_SECONDARY: sim_input().button[1] = false; break;
-    case ACT_GPIO:      sim_gpio_set(b->gpio, 0); break;
+    case ACT_GPIO:      sim_gpio_set(b->gpio, sim_button_gpio_level(*b, false)); break;
     case ACT_PWR:
         sim_input().pwr_events.push_back(win->pwr_long_sent ? 3 : 1);
         break;
@@ -241,7 +241,7 @@ static bool is_active(SimWindow* win, const SimButton* b) {
     switch (b->action) {
     case ACT_PRIMARY:   return sim_input().button[0];
     case ACT_SECONDARY: return sim_input().button[1];
-    case ACT_GPIO:      return sim_gpio_get(b->gpio) != 0;
+    case ACT_GPIO:      return sim_gpio_get(b->gpio) == sim_button_gpio_level(*b, true);
     case ACT_PWR:       return win->pwr_flash > 0 || pwr_is_held(win);
     }
     return false;
@@ -300,6 +300,13 @@ SimWindow* sim_window_open(const char* title, const BoardDesc* board, int scale)
     win->layout = window_layout(board, scale);
     win->has_battery  = board->has_battery;
     win->has_rotation = board->has_rotation;
+
+    // Seed each GPIO button to its released level so an active-low control
+    // reads high (idle) before any press, matching real pullup wiring.
+    for (int i = 0; i < board->button_count; ++i) {
+        const SimButton& b = board->buttons[i];
+        if (b.action == ACT_GPIO) sim_gpio_set(b.gpio, sim_button_gpio_level(b, false));
+    }
 
     win->window = SDL_CreateWindow(title ? title : "esprite",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,

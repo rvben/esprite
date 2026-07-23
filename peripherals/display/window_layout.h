@@ -51,6 +51,11 @@ inline constexpr int HELP_CARD_PAD = 16;
 struct WinRect { int x, y, w, h; };
 bool win_rect_contains(const WinRect& r, int x, int y);
 
+// Pin level to drive for an ACT_GPIO control given its press state. An
+// active-low control (pullup wiring) reads low when pressed, high when idle.
+// SDL-free so the window's button polarity is unit-testable.
+int sim_button_gpio_level(const SimButton& b, bool pressed);
+
 struct NubLayout {
     WinRect body;     // drawn nub rect (output coords), inset HIT_INFLATE from
                       // the window edge so its hit rect stays fully on-window
