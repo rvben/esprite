@@ -72,6 +72,13 @@ public:
     void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint16_t* data);
     static uint16_t color565(uint8_t r, uint8_t g, uint8_t b);
 
+    // LVGL flush path: an app sets an address window then streams pixels.
+    void startWrite();
+    void endWrite();
+    void setAddrWindow(int32_t x, int32_t y, int32_t w, int32_t h);
+    void pushColors(uint16_t* data, uint32_t len, bool swap = false);
+    void pushPixels(const void* data, uint32_t len);
+
     // Byte-order flag for pushImage data. The sim framebuffer is native RGB565
     // either way (there is no SPI byte stream to model), so this only keeps
     // sketches that call it compiling and queryable.
@@ -117,6 +124,8 @@ protected:
     int16_t   _w, _h;              // logical width/height (after rotation)
     uint8_t   _rotation = 0;
     bool      _swap = false;
+    int32_t   _awx = 0, _awy = 0, _aww = 0, _awh = 0;   // active address window
+    uint32_t  _awi = 0;                                  // pixels written into it
     int32_t   _cx = 0, _cy = 0;    // text cursor
     uint16_t  _fg = TFT_WHITE, _bg = TFT_BLACK;
     bool      _opaque = false;     // draw a text background

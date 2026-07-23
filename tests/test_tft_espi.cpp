@@ -82,3 +82,31 @@ TEST_CASE("getTouch reports logical coordinates under a flipped rotation") {
     CHECK(y == tft.height() - 21);
     sim_input().touch_pressed = false;
 }
+
+TEST_CASE("TFT_eSPI setAddrWindow + pushColors writes a block into the framebuffer") {
+    TFT_eSPI tft(8, 8);
+    tft.init();
+    tft.fillScreen(0x0000);
+    uint16_t block[4] = { 0xF800, 0x07E0, 0x001F, 0xFFFF };  // 2x2
+    tft.startWrite();
+    tft.setAddrWindow(1, 1, 2, 2);
+    tft.pushColors(block, 4, false);
+    tft.endWrite();
+    Framebuffer& fb = sim_framebuffer();
+    CHECK(fb.pixel(1, 1) == 0xF800);  // top-left of the window
+    CHECK(fb.pixel(2, 1) == 0x07E0);  // top-right
+    CHECK(fb.pixel(1, 2) == 0x001F);  // bottom-left
+    CHECK(fb.pixel(2, 2) == 0xFFFF);  // bottom-right
+}
+
+TEST_CASE("TFT_eSPI pushColors writes native RGB565 regardless of the swap flag") {
+    // The sim framebuffer is native RGB565 (no SPI byte stream to model), so a
+    // real app that sets swap=true for its panel still renders correct colors.
+    TFT_eSPI tft(4, 4);
+    tft.init();
+    tft.fillScreen(0x0000);
+    uint16_t one[1] = { 0x12F8 };
+    tft.setAddrWindow(0, 0, 1, 1);
+    tft.pushColors(one, 1, true);            // swap requested, but ignored
+    CHECK(sim_framebuffer().pixel(0, 0) == 0x12F8);
+}

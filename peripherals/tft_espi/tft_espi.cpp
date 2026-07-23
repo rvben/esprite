@@ -158,6 +158,31 @@ void TFT_eSPI::pushImage(int32_t x, int32_t y, int32_t w, int32_t h, const uint1
             putpx(x + col, y + row, data[row * w + col]);
 }
 
+void TFT_eSPI::startWrite() {}
+void TFT_eSPI::endWrite() {}
+
+void TFT_eSPI::setAddrWindow(int32_t x, int32_t y, int32_t w, int32_t h) {
+    _awx = x; _awy = y; _aww = w; _awh = h; _awi = 0;
+}
+
+void TFT_eSPI::pushColors(uint16_t* data, uint32_t len, bool /*swap*/) {
+    // The framebuffer is native RGB565; the swap flag (a real panel's SPI byte
+    // order) does not apply here, exactly like setSwapBytes/pushImage. Ignoring
+    // it keeps a swap=true app rendering correct colors in the sim.
+    for (uint32_t k = 0; k < len && _aww > 0 && _awh > 0; ++k) {
+        uint32_t idx = _awi + k;
+        int32_t col = (int32_t)(idx % (uint32_t)_aww);
+        int32_t row = (int32_t)(idx / (uint32_t)_aww);
+        if (row >= _awh) break;   // more pixels than the window holds: clip
+        putpx(_awx + col, _awy + row, data[k]);
+    }
+    _awi += len;
+}
+
+void TFT_eSPI::pushPixels(const void* data, uint32_t len) {
+    pushColors((uint16_t*)data, len, false);
+}
+
 // ---- Text ----
 void TFT_eSPI::drawChar(int32_t x, int32_t y, char c, uint16_t fg, uint16_t bg, uint8_t size) {
     unsigned char uc = (unsigned char)c;
