@@ -395,6 +395,12 @@ add_executable(sim_itests_qemu tests/itest_main.cpp tests/itest_qemu.cpp)
 target_link_libraries(sim_itests_qemu PRIVATE cli_lib)
 link_sim_targets(sim_itests_qemu)
 
+# An LVGL app's own display + flush_cb pushing through the TFT_eSPI shim reaches
+# sim_framebuffer (the driver-boundary approach). Its own executable: lv_init
+# runs once per process. No registered target, so no link_sim_targets.
+add_executable(sim_itests_lvgl_shim tests/itest_main.cpp tests/itest_lvgl_shim.cpp)
+target_link_libraries(sim_itests_lvgl_shim PRIVATE cli_lib)
+
 enable_testing()
 add_test(NAME sim_tests COMMAND sim_tests)
 add_test(NAME sim_itests COMMAND sim_itests)
@@ -405,5 +411,6 @@ if(TARGET sim_itests_daemon)
     add_test(NAME sim_itests_ui COMMAND sim_itests_ui)
 endif()
 add_test(NAME sim_itests_qemu COMMAND sim_itests_qemu)
+add_test(NAME sim_itests_lvgl_shim COMMAND sim_itests_lvgl_shim)
 
 endif()  # ESPRITE_BUILD_STANDALONE
