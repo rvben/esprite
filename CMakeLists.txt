@@ -211,6 +211,9 @@ endfunction()
 function(esprite_add_runner exe)
     cmake_parse_arguments(R "" "TARGET" "" ${ARGN})
     add_executable(${exe} ${esprite_SOURCE_DIR}/cli/main.cpp)
+    # ESPRITE_RUNNER makes this binary default to native single-target (no
+    # embedded qemu boards) so --target-less commands resolve to its one target.
+    target_compile_definitions(${exe} PRIVATE ESPRITE_RUNNER=1)
     target_link_libraries(${exe} PRIVATE cli_lib)
     if(APPLE)
         target_link_libraries(${exe} PRIVATE target_${R_TARGET})

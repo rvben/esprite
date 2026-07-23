@@ -8,22 +8,26 @@ trap 'rm -rf "$WORK"' EXIT
 cmake -S "$(dirname "$0")" -B "$WORK/build" \
       -DESPRITE_SOURCE_DIR="$ESPRITE_SOURCE_DIR" >/dev/null
 cmake --build "$WORK/build" --target consumer-runner >/dev/null
-# The runner is native-only: suppress embedded qemu boards so the single
-# consumer target resolves without --target. This is a real subprocess with a
-# fresh registry, so it also verifies the gate (which the process-global,
-# idempotent registry makes untestable in-process).
-OUT="$(ESPRITE_REGISTER_QEMU_BUILTINS=0 "$WORK/build/consumer-runner" list-targets --json)"
+# The runner defaults to native single-target (ESPRITE_RUNNER suppresses the
+# embedded qemu boards), so no env var is needed here: a fresh subprocess must
+# list only the consumer target.
+OUT="$("$WORK/build/consumer-runner" list-targets --json)"
 if ! echo "$OUT" | grep -q '"consumer"'; then
     echo "FAIL: consumer target missing"; exit 1
 fi
 if echo "$OUT" | grep -q 'qemu_esp32c3'; then
-    echo "FAIL: gate did not suppress qemu builtins"; exit 1
+    echo "FAIL: runner did not default to native single-target"; exit 1
 fi
-# Exercise the daemon path too (it shares the gate helper and the default
-# target): a boot with no explicit target must use --target and succeed.
+# A --target-less command must resolve to the single onboarded target and render.
+"$WORK/build/consumer-runner" screenshot "$WORK/shot.png" >/dev/null
+if [ ! -s "$WORK/shot.png" ]; then
+    echo "FAIL: screenshot without --target did not render"; exit 1
+fi
+# The daemon path shares the default and the default target: a boot with no
+# explicit target must use --target and succeed.
 printf '{"cmd":"boot"}\n{"cmd":"quit"}\n' \
-    | ESPRITE_REGISTER_QEMU_BUILTINS=0 "$WORK/build/consumer-runner" run --target consumer > "$WORK/run.out"
+    | "$WORK/build/consumer-runner" run --target consumer > "$WORK/run.out"
 if ! grep -q '"ok":true' "$WORK/run.out"; then
     echo "FAIL: daemon boot did not succeed"; cat "$WORK/run.out"; exit 1
 fi
-echo "consumer runner OK (gate + daemon verified)"
+echo "consumer runner OK (native single-target default + screenshot + daemon)"
