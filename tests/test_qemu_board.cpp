@@ -150,6 +150,18 @@ TEST_CASE("qemu_board_register carries the http guest port into the machine spec
     CHECK(t->qemu->http_guest_port == 8080);
 }
 
+TEST_CASE("builtin and env board installers are separable") {
+    // Gating the built-ins must not disable the env-file path, and vice versa.
+    std::string err;
+    // Env installer with no ESPRITE_QEMU_BOARD set is a clean no-op success.
+    CHECK(qemu_env_board_install(&err));
+    CHECK(err.empty());
+    // Built-in installer registers the embedded specs; the C3 rgb board is one.
+    CHECK(qemu_builtin_boards_install(&err));
+    CHECK(err.empty());
+    CHECK(sim_target("qemu_esp32c3_rgb") != nullptr);
+}
+
 TEST_CASE("ESPRITE_QEMU_BOARD registers a user board file") {
     std::string dir = "/tmp/esprite_test_qemu_board";
     system(("rm -rf " + dir + " && mkdir -p " + dir).c_str());

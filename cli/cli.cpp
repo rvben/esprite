@@ -486,6 +486,18 @@ static std::string bounded_array(const std::string& arr, int offset, int limit) 
            ",\"offset\":" + std::to_string(offset) + ",\"count\":" + std::to_string(shown) +
            ",\"truncated\":" + jbool(truncated) + "}";
 }
+// Register qemu boards honoring the ESPRITE_REGISTER_QEMU_BUILTINS gate: the
+// env-provided board (ESPRITE_QEMU_BOARD) is always available; the embedded
+// built-ins register unless a per-project runner sets the gate to "0", which
+// keeps a native-only runner single-target so --target-less commands resolve.
+static bool install_qemu_boards_gated(std::string* err) {
+    const char* g = getenv("ESPRITE_REGISTER_QEMU_BUILTINS");
+    bool ok = true;
+    if (!(g && std::string(g) == "0")) ok = qemu_builtin_boards_install(err);
+    if (ok) ok = qemu_env_board_install(err);
+    return ok;
+}
+
 int esprite_main(int argc, char** argv) {
     g_interrupted = 0;         // each invocation starts fresh; tests call this repeatedly in-process
     install_signal_handlers(); // before qemu_backend_install: a qemu boot's wait loops must see g_interrupted
@@ -495,7 +507,7 @@ int esprite_main(int argc, char** argv) {
         // plus an optional ESPRITE_QEMU_BOARD user file) before any target
         // resolution. Idempotent across repeated in-process calls.
         std::string board_err;
-        if (!qemu_boards_install(&board_err)) return fail("bad_args", board_err, 2);
+        if (!install_qemu_boards_gated(&board_err)) return fail("bad_args", board_err, 2);
     }
     BackendShutdownGuard backend_guard;
     set_output_mode(argc, argv);
@@ -1001,7 +1013,7 @@ int esprite_daemon(FILE* in, FILE* out) {
         // Same data-driven qemu target registration as esprite_main, for
         // direct esprite_daemon callers (tests); idempotent.
         std::string board_err;
-        if (!qemu_boards_install(&board_err)) return fail("bad_args", board_err, 2);
+        if (!install_qemu_boards_gated(&board_err)) return fail("bad_args", board_err, 2);
     }
     BackendShutdownGuard backend_guard;   // tests call esprite_daemon directly, bypassing esprite_main
     char line[16384];

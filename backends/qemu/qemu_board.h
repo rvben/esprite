@@ -44,7 +44,15 @@ const SimTarget* qemu_board_register(const QemuBoardSpec& spec, std::string* err
 // hook). Split out from qemu_boards_install so the file path is testable.
 bool qemu_board_register_file(const std::string& path, std::string* err);
 
-// Registers the built-in specs embedded from targets/qemu/*.json, then the
-// optional ESPRITE_QEMU_BOARD file. Idempotent (second call is a no-op) so
-// tests that enter esprite_main repeatedly do not double-register.
+// Registers the built-in specs embedded from targets/qemu/*.json. Idempotent
+// (second call is a no-op). Kept separate so a per-project runner can suppress
+// the built-ins without also disabling the ESPRITE_QEMU_BOARD user file.
+bool qemu_builtin_boards_install(std::string* err);
+
+// Registers the optional ESPRITE_QEMU_BOARD user file (no-op if unset).
+// Idempotent. Always available regardless of the built-in gate.
+bool qemu_env_board_install(std::string* err);
+
+// Convenience: both installers, in order. Idempotent (second call is a no-op)
+// so tests that enter esprite_main repeatedly do not double-register.
 bool qemu_boards_install(std::string* err);

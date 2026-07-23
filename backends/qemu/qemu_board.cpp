@@ -156,7 +156,7 @@ bool qemu_board_register_file(const std::string& path, std::string* err) {
 extern const char* const kQemuBoardBuiltins[];
 extern const int kQemuBoardBuiltinCount;
 
-bool qemu_boards_install(std::string* err) {
+bool qemu_builtin_boards_install(std::string* err) {
     static bool done = false;
     if (done) return true;
     for (int i = 0; i < kQemuBoardBuiltinCount; i++) {
@@ -164,9 +164,20 @@ bool qemu_boards_install(std::string* err) {
         if (!qemu_board_parse(kQemuBoardBuiltins[i], &spec, err)) return false;
         if (!qemu_board_register(spec, err)) return false;
     }
+    done = true;
+    return true;
+}
+
+bool qemu_env_board_install(std::string* err) {
+    static bool done = false;
+    if (done) return true;
     if (const char* path = getenv("ESPRITE_QEMU_BOARD")) {
         if (!qemu_board_register_file(path, err)) return false;
     }
     done = true;
     return true;
+}
+
+bool qemu_boards_install(std::string* err) {
+    return qemu_builtin_boards_install(err) && qemu_env_board_install(err);
 }
