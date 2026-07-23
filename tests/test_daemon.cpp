@@ -25,6 +25,22 @@ static std::string run_daemon(const std::string& input) {
     return reply;
 }
 
+// Same as run_daemon, but supplies a default boot target for lines that omit one.
+static std::string run_daemon_default(const std::string& input, const char* default_target) {
+    FILE* in = fmemopen((void*)input.data(), input.size(), "r");
+    char* buf = nullptr;
+    size_t len = 0;
+    FILE* out = open_memstream(&buf, &len);
+    REQUIRE(in != nullptr);
+    REQUIRE(out != nullptr);
+    esprite_daemon(in, out, default_target);
+    fclose(in);
+    fclose(out);
+    std::string reply(buf, len);
+    free(buf);
+    return reply;
+}
+
 // Count newline-terminated replies.
 static int reply_count(const std::string& out) {
     int n = 0;
@@ -125,6 +141,22 @@ TEST_CASE("run session: booting a qemu target installs the qemu backend even whe
     std::string out = run_daemon("{\"cmd\":\"boot\",\"target\":\"qemu_esp32c3\"}\n");
     CHECK(out.find("\"kind\":\"backend_unavailable\"") != std::string::npos);
     CHECK(out.find("\"ok\":true") == std::string::npos);
+}
+
+TEST_CASE("run session: boots the default target when the boot line omits target") {
+    // A boot line with no "target" uses the daemon's default (threaded from the
+    // front-end's --target), instead of returning unknown_target.
+    std::string out = run_daemon_default(
+        "{\"cmd\":\"boot\"}\n{\"cmd\":\"quit\"}\n", "cyd");
+    CHECK(out.find("\"ok\":true") != std::string::npos);
+    CHECK(out.find("unknown_target") == std::string::npos);
+}
+
+TEST_CASE("run session: an explicit target still overrides any default") {
+    // The default only fills an omitted target; an explicit one wins.
+    std::string out = run_daemon_default(
+        "{\"cmd\":\"boot\",\"target\":\"cyd\"}\n{\"cmd\":\"quit\"}\n", "sample_gfx");
+    CHECK(out.find("\"ok\":true") != std::string::npos);
 }
 
 TEST_CASE("run session: an invalid serial-expect regex is an error reply, not a crash") {

@@ -559,7 +559,7 @@ int esprite_main(int argc, char** argv) {
         return 0;
     }
 
-    if (cmd == "run") return esprite_daemon(stdin, stdout);
+    if (cmd == "run") return esprite_daemon(stdin, stdout, opt_val(argc, argv, "--target"));
 
     if (cmd == "scenario") {
         std::string file = positional(argc, argv, 0);
@@ -996,7 +996,7 @@ static void session_err(FILE* out, const char* kind, const std::string& msg) {
 // `in`, emit one JSON reply per line on `out`. Refs from {"cmd":"ui"} stay valid
 // for {"cmd":"tap","ref":...} within the session (the snapshot-ref model).
 // Streams are injected so tests can drive a full session in-process.
-int esprite_daemon(FILE* in, FILE* out) {
+int esprite_daemon(FILE* in, FILE* out, const char* default_target) {
     // esprite_main also does this, but esprite_daemon is a public entry point
     // tests (and future callers) invoke directly - without this, a qemu boot
     // in such a process would find BACKEND_QEMU unregistered and silently
@@ -1077,6 +1077,7 @@ int esprite_daemon(FILE* in, FILE* out) {
                 session_err(out, "already_booted", "one boot per run session; start a new session to boot again");
             } else {
                 std::string t = doc["target"] | "";
+                if (t.empty() && default_target) t = default_target;
                 const SimTarget* target = sim_target(t);
                 std::string boot_err;
                 if (target) {

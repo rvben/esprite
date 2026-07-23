@@ -5,5 +5,6 @@
 int esprite_main(int argc, char** argv);
 
 // The `run` session loop: newline-delimited JSON commands from `in`, one JSON
-// reply per line on `out`. Exposed so tests can drive a session in-process.
-int esprite_daemon(FILE* in, FILE* out);
+// reply per line on `out`. `default_target` (nullable) boots when a boot line
+// omits "target". Exposed so tests can drive a session in-process.
+int esprite_daemon(FILE* in, FILE* out, const char* default_target = nullptr);
