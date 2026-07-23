@@ -20,6 +20,15 @@ bool sim_boot(const std::string& key) {
     sim_clock_reset();
     sim_esp_restart_reset();             // clear sticky restart flag for a clean boot
     sim_gpio_reset();                    // clear injected GPIO levels for a clean boot
+    // Seed board GPIO buttons to their released level so an active-low control
+    // (pullup wiring) reads high (idle), not "pressed", when setup() runs. This
+    // is the electrical initial state for every boot path (screenshot included),
+    // independent of whether a live window is ever opened.
+    if (t->board)
+        for (int i = 0; i < t->board->button_count; ++i) {
+            const SimButton& b = t->board->buttons[i];
+            if (b.action == ACT_GPIO) sim_gpio_set(b.gpio, sim_button_gpio_level(b, false));
+        }
     // Default HTTP port for socket-backed webserver shims (targets can override
     // via the same env before boot).
     if (!getenv("ESPRITE_HTTP_PORT")) setenv("ESPRITE_HTTP_PORT", "8080", 1);

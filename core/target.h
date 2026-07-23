@@ -80,3 +80,9 @@ void             sim_register_target(const SimTarget* t);
 const SimTarget* sim_target(const std::string& key);
 int              sim_target_count();
 const SimTarget* sim_target_at(int i);
+
+// Pin level to drive for an ACT_GPIO control given its press state. An
+// active-low control (pullup wiring) reads low when pressed, high when idle.
+// Lives with SimButton so boot seeding (core) and the window (peripherals)
+// share one polarity source.
+int sim_button_gpio_level(const SimButton& b, bool pressed);

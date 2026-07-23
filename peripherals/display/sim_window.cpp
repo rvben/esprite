@@ -301,13 +301,6 @@ SimWindow* sim_window_open(const char* title, const BoardDesc* board, int scale)
     win->has_battery  = board->has_battery;
     win->has_rotation = board->has_rotation;
 
-    // Seed each GPIO button to its released level so an active-low control
-    // reads high (idle) before any press, matching real pullup wiring.
-    for (int i = 0; i < board->button_count; ++i) {
-        const SimButton& b = board->buttons[i];
-        if (b.action == ACT_GPIO) sim_gpio_set(b.gpio, sim_button_gpio_level(b, false));
-    }
-
     win->window = SDL_CreateWindow(title ? title : "esprite",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         win->layout.window.w, win->layout.window.h, SDL_WINDOW_ALLOW_HIGHDPI);

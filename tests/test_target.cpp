@@ -1,6 +1,7 @@
 #include "doctest.h"
 #include "target.h"
 #include "runtime.h"
+#include "Arduino.h"   // digitalRead
 
 static int g_setup_calls = 0;
 static int g_loop_calls = 0;
@@ -25,6 +26,27 @@ TEST_CASE("target registry and runtime pump") {
 
 TEST_CASE("booting an unknown target fails") {
     CHECK_FALSE(sim_boot("does-not-exist"));
+}
+
+static int g_active_low_boot_read = -1;
+static void active_low_setup() { g_active_low_boot_read = digitalRead(9); }
+static void active_low_loop()  {}
+static const SimButton kActiveLowBtn[] = {
+    {"BOOT", ACT_GPIO, 9, 'b', EDGE_RIGHT, 0.5f, /*active_low=*/true},
+};
+static const BoardDesc kActiveLowBoard = {"AL", 32, 32, false, false, false, kActiveLowBtn, 1};
+static const SimTarget kActiveLowTarget = {"test_active_low_boot", "active-low button board",
+                                           active_low_setup, active_low_loop, &kActiveLowBoard};
+
+TEST_CASE("boot seeds active-low GPIO buttons to released (high) before setup") {
+    // Without seeding, sim_gpio_reset() leaves pin 9 at 0, which for an
+    // active-low button reads as pressed. Boot must seed it high (released) so
+    // setup()'s digitalRead sees the idle state - true for screenshot too, which
+    // never opens a window.
+    sim_register_target(&kActiveLowTarget);
+    g_active_low_boot_read = -1;
+    REQUIRE(sim_boot("test_active_low_boot"));
+    CHECK(g_active_low_boot_read == 1);
 }
 
 TEST_CASE("SimButton defaults edge and pos when aggregate-initialized with 4 fields") {
