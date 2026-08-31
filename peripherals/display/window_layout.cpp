@@ -52,6 +52,23 @@ int auto_start(int idx, int n, int edge_origin, int edge_length) {
                   edge_origin + edge_length - NUB_LONG);
 }
 
+// One panel control at x, vertically centered on the card's own height and
+// clipped to the card's padded interior. layout_panel_card shrinks the card on
+// a window too small for PANEL_CARD_W/H, and sim_window only hit-tests the
+// controls after the click is already inside the card, so a control drawn past
+// the card edge is both wrong to look at and impossible to press. A control
+// left with no room comes back as a zero rect, the same way this module
+// represents a control the board does not have; win_rect_contains never
+// matches one and the renderer skips it.
+WinRect place_control(const WinRect& card, int x, int w, int h) {
+    int right    = card.x + card.w - PANEL_PAD;
+    int interior = card.h - 2 * PANEL_PAD;
+    if (w > right - x)   w = right - x;
+    if (h > interior)    h = interior;
+    if (w <= 0 || h <= 0) return WinRect{0, 0, 0, 0};
+    return WinRect{x, card.y + (card.h - h) / 2, w, h};
+}
+
 }  // namespace
 
 WindowLayout window_layout(const BoardDesc* board, int scale) {
@@ -199,17 +216,27 @@ WinRect layout_panel_card(const WindowLayout& l) {
 PanelLayout layout_panel(const WindowLayout& l, bool battery, bool rotation) {
     WinRect card = layout_panel_card(l);
     PanelLayout p{};
+    // x advances by each control's declared width, not its clipped width, so
+    // a control that had to narrow does not shift the ones after it.
     int x = card.x + PANEL_PAD;
     if (battery) {
-        p.bat_bar = WinRect{x, card.y + (PANEL_CARD_H - BAT_BAR_H) / 2, BAT_BAR_W, BAT_BAR_H};
+        p.bat_bar = place_control(card, x, BAT_BAR_W, BAT_BAR_H);
+        // Top-aligned to the bar rather than centered on the card: the readout
+        // reads as a label on the bar, so it tracks the bar's own position.
+        if (p.bat_bar.w > 0) {
+            p.bat_pct = place_control(card, p.bat_bar.x + p.bat_bar.w + PANEL_PCT_LEAD,
+                                      PANEL_PCT_W, PANEL_PCT_H);
+            if (p.bat_pct.w < PANEL_PCT_W) p.bat_pct = WinRect{0, 0, 0, 0};  // "100%" would be cut
+            else                           p.bat_pct.y = p.bat_bar.y + 4;
+        }
         x += BAT_BAR_W + PANEL_PCT_GAP;
-        p.chg_btn = WinRect{x, card.y + (PANEL_CARD_H - PANEL_BTN_H) / 2, PANEL_BTN_W, PANEL_BTN_H};
+        p.chg_btn = place_control(card, x, PANEL_BTN_W, PANEL_BTN_H);
         x += PANEL_BTN_W + PANEL_GAP;
-        p.usb_btn = WinRect{x, card.y + (PANEL_CARD_H - PANEL_BTN_H) / 2, PANEL_BTN_W, PANEL_BTN_H};
+        p.usb_btn = place_control(card, x, PANEL_BTN_W, PANEL_BTN_H);
         x += PANEL_BTN_W + PANEL_GAP;
     }
     if (rotation) {
-        p.rot_btn = WinRect{x, card.y + (PANEL_CARD_H - PANEL_BTN_H) / 2, PANEL_BTN_W, PANEL_BTN_H};
+        p.rot_btn = place_control(card, x, PANEL_BTN_W, PANEL_BTN_H);
     }
     return p;
 }

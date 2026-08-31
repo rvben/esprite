@@ -104,12 +104,21 @@ static void draw_text(SDL_Renderer* r, int x, int y, const char* s, int px) {
 
 static void draw_labeled(SDL_Renderer* r, const SDL_Rect& rect, const char* label,
                          bool on, int px) {
+    // An empty rect is layout's "this control has no room" (or no board
+    // support), the same value win_rect_contains never matches. Drawing it
+    // would center the label on the rect's 0,0 origin instead.
+    if (rect.w <= 0 || rect.h <= 0) return;
     if (on) SDL_SetRenderDrawColor(r, 92, 122, 92, 255);
     else    SDL_SetRenderDrawColor(r, 58, 60, 66, 255);
     SDL_RenderFillRect(r, &rect);
     SDL_SetRenderDrawColor(r, 140, 142, 150, 255);
     SDL_RenderDrawRect(r, &rect);
+    // A label wider than the control it names would be centered to a negative
+    // offset and drawn straight over its neighbours, so a narrowed control
+    // keeps its box (still drawn, still clickable) and loses the text. Layout
+    // clips the rects but has no notion of fonts, so the fit is decided here.
     int tw = text_w(label, px), th = 7 * px;
+    if (tw > rect.w || th > rect.h) return;
     SDL_SetRenderDrawColor(r, 232, 232, 238, 255);
     draw_text(r, rect.x + (rect.w - tw) / 2, rect.y + (rect.h - th) / 2, label, px);
 }
@@ -614,7 +623,7 @@ bool sim_window_tick(SimWindow* win) {
 
         PanelLayout p = layout_panel(l, win->has_battery, win->has_rotation);
         int px = scale_len(2, dpr);
-        if (win->has_battery) {
+        if (win->has_battery && p.bat_bar.w > 0) {
             int pct = sim_input().battery_pct;
             if (pct < 0) pct = 0; else if (pct > 100) pct = 100;
             SDL_Rect bar = to_px(p.bat_bar, dpr);
@@ -626,12 +635,21 @@ bool sim_window_tick(SimWindow* win) {
             else if (pct <= 20) SDL_SetRenderDrawColor(r, 210, 150, 40, 255);
             else                SDL_SetRenderDrawColor(r, 90, 170, 90, 255);
             SDL_RenderFillRect(r, &fill);
-            char buf[8]; snprintf(buf, sizeof(buf), "%d%%", pct);
-            SDL_SetRenderDrawColor(r, 220, 220, 228, 255);
-            // Drawn inside PANEL_PCT_GAP (8 pt lead-in + text_w("100%", 2)),
-            // the room layout_panel reserves between bat_bar and chg_btn so
-            // this text has somewhere to live instead of being painted over.
-            draw_text(r, bar.x + bar.w + scale_len(8, dpr), bar.y + scale_len(4, dpr), buf, px);
+            // bat_pct is the room layout_panel reserves between the bar and
+            // chg_btn so this text has somewhere to live instead of being
+            // painted over, and comes back empty when the card is too narrow
+            // to hold it.
+            if (p.bat_pct.w > 0) {
+                char buf[8]; snprintf(buf, sizeof(buf), "%d%%", pct);
+                SDL_Rect pctr = to_px(p.bat_pct, dpr);
+                SDL_SetRenderDrawColor(r, 220, 220, 228, 255);
+                draw_text(r, pctr.x, pctr.y, buf, px);
+            }
+        }
+        if (win->has_battery) {
+            // Each skips itself if layout left it no room; the bar above is
+            // guarded separately because its percent readout is drawn from the
+            // bar's own position rather than from a rect of its own.
             draw_labeled(r, to_px(p.chg_btn, dpr), "CHG", sim_input().charging, px);
             draw_labeled(r, to_px(p.usb_btn, dpr), "USB", sim_input().vbus, px);
         }

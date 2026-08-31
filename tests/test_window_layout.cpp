@@ -108,6 +108,22 @@ const BoardDesc kBottomPanelBoard = {
     "fixture-bottom-panel", 240, 240, false, true, false, kFiveBottom, 5,
 };
 
+// A board with battery and rotation whose window is far too narrow for the
+// full-size panel card, so layout_panel_card shrinks it and the controls have
+// to cope with a card smaller than PANEL_CARD_W.
+const BoardDesc kNarrowPanelBoard = {
+    "fixture-narrow-panel", 240, 240, true, true, false, nullptr, 0,
+};
+
+// A board whose card leaves room for the full battery bar but only part of the
+// "100%" readout beside it: 180 pt wide gives a 208 pt card, of which the pad,
+// bar and lead eat 182, leaving 26 of the 48 the readout needs. The band between
+// "fits" and "no room at all" is exactly where a partial width would cut the
+// text mid-glyph.
+const BoardDesc kPctSqueezeBoard = {
+    "fixture-pct-squeeze", 180, 180, false, true, false, nullptr, 0,
+};
+
 // True if this nub came from an auto-stacked (pos < 0) button. Only autos are
 // promised not to overlap each other; overlapping explicit positions are the
 // board author's own choice, so a blanket pairwise check would be wrong.
@@ -117,6 +133,14 @@ bool is_auto(const BoardDesc* board, const NubLayout& n) {
 
 bool rects_overlap(const WinRect& a, const WinRect& b) {
     return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+// The layout module's "this control is absent or has no room" value. All four
+// fields, not just the size: a rect carrying a leftover position is a control
+// the renderer would skip but a later edit could start drawing at the wrong
+// place, so the convention is the whole rect being zero.
+bool rect_is_zero(const WinRect& r) {
+    return r.x == 0 && r.y == 0 && r.w == 0 && r.h == 0;
 }
 
 // inner is fully contained in outer (both edges inclusive of outer's bounds).
@@ -510,4 +534,70 @@ TEST_CASE("panel card min-clamps its size to fit a synthetic tiny board, fully n
     CHECK(panel.y + panel.h <= l.window.y + l.window.h);
     CHECK(panel.w < PANEL_CARD_W);   // proves the min-clamp actually engaged
     CHECK(panel.h < PANEL_CARD_H);
+}
+
+TEST_CASE("panel controls stay inside a shrunk card instead of spilling past it") {
+    // sim_window only hit-tests the controls after confirming the click landed
+    // inside the card, so a control drawn beyond the card's edge is both wrong
+    // to look at and impossible to press. On a window too narrow for the full
+    // card the controls must narrow or drop out, never overflow.
+    WindowLayout l = window_layout(&kNarrowPanelBoard, 1);
+    WinRect card = layout_panel_card(l);
+    REQUIRE(card.w < PANEL_CARD_W);   // the shrink actually engaged
+    PanelLayout p = layout_panel(l, true, true);
+
+    const WinRect controls[] = {p.bat_bar, p.bat_pct, p.chg_btn, p.usb_btn, p.rot_btn};
+    for (const WinRect& c : controls) {
+        if (c.w == 0 && c.h == 0) continue;   // absent: this module's convention
+        CHECK(rect_within(c, card));
+    }
+    // Not vacuous: the widest control still has room here, so the loop above
+    // is not passing by every control having vanished.
+    CHECK(p.bat_bar.w > 0);
+
+    // Control: on a roomy card nothing is clipped and every control keeps its
+    // full declared size, so the clipping only engages where it must.
+    WindowLayout wide = window_layout(&kThreeRightBoard, 1);
+    WinRect wide_card = layout_panel_card(wide);
+    PanelLayout wp = layout_panel(wide, true, true);
+    CHECK(wide_card.w == PANEL_CARD_W);
+    CHECK(wp.bat_bar.w == BAT_BAR_W);
+    CHECK(wp.chg_btn.w == PANEL_BTN_W);
+    CHECK(wp.usb_btn.w == PANEL_BTN_W);
+    CHECK(wp.rot_btn.w == PANEL_BTN_W);
+    CHECK(rect_within(wp.rot_btn, wide_card));
+}
+
+TEST_CASE("the battery percent readout gets its reserved room, or none at all") {
+    // The readout is drawn from a rect like every other control so that its
+    // reservation is clipped here rather than trusted by the renderer. It is
+    // all-or-nothing: a partial width would cut "100%" mid-glyph.
+    WindowLayout wide = window_layout(&kThreeRightBoard, 1);
+    PanelLayout wp = layout_panel(wide, true, true);
+    CHECK(wp.bat_pct.w == PANEL_PCT_W);
+    CHECK(wp.bat_pct.h == PANEL_PCT_H);
+    // Sits in the reserved gap: after the bar, before chg_btn, and reading as
+    // a label on the bar rather than centered on the card like the buttons.
+    CHECK(wp.bat_pct.x == wp.bat_bar.x + wp.bat_bar.w + PANEL_PCT_LEAD);
+    CHECK(wp.bat_pct.x + wp.bat_pct.w <= wp.chg_btn.x);
+    CHECK(wp.bat_pct.y == wp.bat_bar.y + 4);
+    CHECK(rect_within(wp.bat_pct, layout_panel_card(wide)));
+
+    // The case the all-or-nothing rule exists for: the card has 26 pt beside a
+    // full-width bar, enough for a rect but not for "100%". Clipping to 26 would
+    // draw two and a half glyphs, so the readout is dropped instead.
+    WindowLayout squeeze = window_layout(&kPctSqueezeBoard, 1);
+    PanelLayout sp = layout_panel(squeeze, true, false);
+    WinRect squeeze_card = layout_panel_card(squeeze);
+    REQUIRE(squeeze_card.w < PANEL_CARD_W);        // the shrink engaged
+    REQUIRE(sp.bat_bar.w == BAT_BAR_W);            // but not far enough to touch the bar
+    CHECK(squeeze_card.x + squeeze_card.w - PANEL_PAD
+          - (sp.bat_bar.x + sp.bat_bar.w + PANEL_PCT_LEAD) < PANEL_PCT_W);   // partial room
+    CHECK(rect_is_zero(sp.bat_pct));
+
+    // kTinyBoard's card is narrower than the bar alone, so the bar itself is
+    // clipped and there is no room left for the readout at all.
+    WindowLayout tiny = window_layout(&kTinyBoard, 1);
+    PanelLayout tp = layout_panel(tiny, true, false);
+    CHECK(rect_is_zero(tp.bat_pct));
 }

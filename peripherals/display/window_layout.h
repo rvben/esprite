@@ -36,7 +36,9 @@ inline constexpr int PANEL_BTN_H   = 34;
 // the old hardware-strip's `text_w("100%", 2) + 8` reservation so the percent
 // text has somewhere to live instead of being drawn over by chg_btn.
 inline constexpr int PANEL_PCT_W    = 4 /* strlen("100%") */ * 6 * 2;
-inline constexpr int PANEL_PCT_GAP  = PANEL_PCT_W + 8;
+inline constexpr int PANEL_PCT_H    = 7 /* glyph rows */ * 2;
+inline constexpr int PANEL_PCT_LEAD = 8;   // gap between the bar and the readout
+inline constexpr int PANEL_PCT_GAP  = PANEL_PCT_W + PANEL_PCT_LEAD;
 
 inline constexpr int PANEL_CARD_W  = PANEL_PAD + BAT_BAR_W + PANEL_PCT_GAP + PANEL_BTN_W
                                     + PANEL_GAP + PANEL_BTN_W + PANEL_GAP + PANEL_BTN_W
@@ -113,11 +115,20 @@ WinRect layout_help_card(const WindowLayout& l, int content_w, int content_h);
 // fully inside the window regardless of how small the board is.
 WinRect layout_panel_card(const WindowLayout& l);
 
-struct PanelLayout { WinRect bat_bar, chg_btn, usb_btn, rot_btn; };
-// Positions the controls the board actually has inside the fixed-size panel
-// card, left to right with PANEL_GAP between them - except between bat_bar
-// and chg_btn, which are separated by PANEL_PCT_GAP instead, reserving room
-// for the battery percent readout so it isn't drawn over by chg_btn. Battery
-// contributes bat_bar + chg_btn + usb_btn, rotation contributes rot_btn. A control the
+// bat_pct is where the "100%" readout goes, in the room PANEL_PCT_GAP reserves
+// between the bar and chg_btn. It is a rect like the rest so the reservation is
+// clipped and checkable here rather than trusted at the point it is drawn.
+struct PanelLayout { WinRect bat_bar, bat_pct, chg_btn, usb_btn, rot_btn; };
+// Positions the controls the board actually has inside the panel card, left to
+// right with PANEL_GAP between them - except between bat_bar and chg_btn,
+// which are separated by PANEL_PCT_GAP instead, reserving room for the battery
+// percent readout so it isn't drawn over by chg_btn. Battery contributes
+// bat_bar + chg_btn + usb_btn, rotation contributes rot_btn. A control the
 // board lacks comes back as a zero rect ({0,0,0,0}) and reserves no space.
+// Every returned control nests inside the card: layout_panel_card shrinks the
+// card on a window too small for the full size, and a control that no longer
+// fits is narrowed, or comes back as the same zero rect once there is no room
+// left at all. Positions do not depend on that narrowing - each control sits
+// where its declared width would put it - so shrinking the card drops controls
+// off the right rather than reflowing the ones before them.
 PanelLayout layout_panel(const WindowLayout& l, bool battery, bool rotation);
