@@ -80,10 +80,19 @@ struct WindowLayout {
 // at that fraction along their edge - the screen's matching dimension: height
 // for EDGE_LEFT/EDGE_RIGHT, width for EDGE_TOP/EDGE_BOTTOM - clamped so the
 // NUB_LONG body never overflows the edge. Buttons with pos < 0 auto-stack
-// evenly within the middle 60% of their edge, in declaration order among that
+// evenly within a band on their edge, in declaration order among that
 // edge's own auto buttons, independent of any explicit-pos buttons sharing
 // the edge; overlapping explicit positions are the caller's choice, but
-// autos never overlap each other. Only the first MAX_LAYOUT_BUTTONS buttons
+// autos never overlap each other, hit rects included, and a bottom-edge stack
+// also stays clear of more_nub (sim_window hit-tests that first, so an overlap
+// would send those clicks to the panel). Autos share the middle 60% of the
+// edge while that band gives each one a hit rect (NUB_LONG + 2*HIT_INFLATE) of
+// pitch; below that they use exactly that pitch, centred on the edge. Since
+// the outermost hit inflation hangs into the bezel where no other target sits,
+// n autos need (n-1)*(NUB_LONG + 2*HIT_INFLATE) + NUB_LONG points of edge. An
+// edge shorter than that cannot separate them at any spacing: the stack then
+// spreads evenly over the whole edge and adjacent targets do overlap.
+// Only the first MAX_LAYOUT_BUTTONS buttons
 // are laid out (mirrors sim_window.cpp's MAX_BTN truncation). An edge with no
 // buttons on it carries no NUB_PROTRUDE padding, so a board with zero buttons
 // anywhere gets BEZEL_MARGIN on all four sides. more_nub is sized and

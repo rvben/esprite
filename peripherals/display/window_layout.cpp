@@ -23,6 +23,35 @@ int edge_margin(bool has_buttons) {
     return BEZEL_MARGIN + (has_buttons ? NUB_PROTRUDE : 0);
 }
 
+// Where the idx-th of n auto-stacked nubs starts along its edge.
+//
+// Autos share the middle 60% of the edge while that band gives each one a full
+// hit rect (NUB_LONG + 2 * HIT_INFLATE) of pitch, so a roomy edge keeps the
+// nubs clustered around its centre. Below that they fall back to exactly that
+// pitch, centred on the edge. The outermost hit inflation then hangs into the
+// bezel, where no other target sits, so n of them need (n - 1) * pitch +
+// NUB_LONG points of edge rather than n * pitch. An edge shorter than that
+// cannot separate n targets at any spacing; the stack spreads evenly over the
+// whole edge and adjacent targets do overlap.
+int auto_start(int idx, int n, int edge_origin, int edge_length) {
+    const int pitch = NUB_LONG + 2 * HIT_INFLATE;
+    float slice = 0.6f * (float)edge_length / (float)n;
+    if (slice >= (float)pitch) {
+        float range_start = edge_origin + 0.2f * edge_length;
+        float range_len   = 0.6f * (float)edge_length;
+        int center = (int)(range_start + slice * (idx + 0.5f));
+        return clampi(center - NUB_LONG / 2, (int)range_start,
+                      (int)(range_start + range_len) - NUB_LONG);
+    }
+    int span = (n - 1) * pitch + NUB_LONG;
+    if (span <= edge_length)
+        return edge_origin + (edge_length - span) / 2 + idx * pitch;
+    float slot = (float)edge_length / (float)n;
+    int center = (int)(edge_origin + slot * (idx + 0.5f));
+    return clampi(center - NUB_LONG / 2, edge_origin,
+                  edge_origin + edge_length - NUB_LONG);
+}
+
 }  // namespace
 
 WindowLayout window_layout(const BoardDesc* board, int scale) {
@@ -61,7 +90,7 @@ WindowLayout window_layout(const BoardDesc* board, int scale) {
                               NUB_LONG, NUB_THICK};
 
     // How many auto-stack (pos < 0) buttons share each edge, so each one
-    // knows its slice of the middle 60%.
+    // knows its slice of the band.
     int auto_total[4] = {0, 0, 0, 0};
     for (int i = 0; i < count; i++)
         if (board->buttons[i].pos < 0.0f) auto_total[board->buttons[i].edge]++;
@@ -79,14 +108,24 @@ WindowLayout window_layout(const BoardDesc* board, int scale) {
         if (b.pos < 0.0f) {
             int n   = auto_total[edge];
             int idx = auto_index[edge]++;
-            float range_start = edge_origin + 0.2f * edge_length;
-            float range_len   = 0.6f * edge_length;
-            float slice       = range_len / (float)n;
-            int center = (int)(range_start + slice * (idx + 0.5f));
-            // Clamped to the middle-60% range itself (not the full edge):
-            // autos must stay inside that band and never overlap each other.
-            start = clampi(center - NUB_LONG / 2, (int)range_start,
-                           (int)(range_start + range_len) - NUB_LONG);
+            // What must not overlap is the hit rect, which is longer than the
+            // body by HIT_INFLATE at each end, so a stack pitched at NUB_LONG
+            // hands adjacent buttons overlapping click targets even while the
+            // bodies look correctly spaced. auto_start pitches by the hit rect.
+            start = auto_start(idx, n, edge_origin, edge_length);
+            // The "..." nub owns the bottom-right corner and sim_window
+            // hit-tests it before the buttons, so a bottom stack reaching into
+            // it would lose those clicks to the panel. Slide the whole stack
+            // left by the overrun rather than clamping the last nub onto its
+            // neighbour, which would trade the corner for an overlap. The floor
+            // is the window edge, not the screen's: a stack this dense may need
+            // the bezel strip left of the screen, which is the nubs' own band
+            // and carries nothing else.
+            if (edge == EDGE_BOTTOM && l.more_nub.w > 0) {
+                int overrun = auto_start(n - 1, n, edge_origin, edge_length)
+                            + NUB_LONG + HIT_INFLATE - l.more_nub.x;
+                if (overrun > 0) start = clampi(start - overrun, HIT_INFLATE, start);
+            }
         } else {
             float pos = clampf(b.pos, 0.0f, 1.0f);
             int center = (int)(edge_origin + pos * edge_length);

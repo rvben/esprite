@@ -77,6 +77,44 @@ const BoardDesc kTinyBoard = {
     "fixture-tiny", 20, 20, false, false, false, nullptr, 0,
 };
 
+// Four autos on a 240 pt edge: the densest stack that still fits without
+// overlap, and the case that overlaps if the stack is pitched at the nub body
+// length rather than the hit rect length.
+const SimButton kFourAuto[] = {
+    {"0", ACT_PRIMARY, 0, '0', EDGE_RIGHT, -1.0f}, {"1", ACT_PRIMARY, 0, '1', EDGE_RIGHT, -1.0f},
+    {"2", ACT_PRIMARY, 0, '2', EDGE_RIGHT, -1.0f}, {"3", ACT_PRIMARY, 0, '3', EDGE_RIGHT, -1.0f},
+};
+const BoardDesc kFourAutoBoard = {
+    "fixture-four-auto", 240, 240, false, false, false, kFourAuto, 4,
+};
+
+// The shortest edge that can still hold four disjoint click targets:
+// 3 * 48 + 36 = 180. Four whole hit rects would be 192, but the outermost
+// inflation hangs into the bezel where nothing else sits, so an edge between
+// those two numbers must still lay the stack out disjointly.
+const BoardDesc kFourAutoTightBoard = {
+    "fixture-four-auto-tight", 180, 180, false, false, false, kFourAuto, 4,
+};
+
+// Five autos along the bottom edge of a panel-capable board: dense enough to
+// use the fixed pitch, which runs the stack into the bottom-right "..." nub
+// unless the layout slides it clear.
+const SimButton kFiveBottom[] = {
+    {"0", ACT_PRIMARY, 0, '0', EDGE_BOTTOM, -1.0f}, {"1", ACT_PRIMARY, 0, '1', EDGE_BOTTOM, -1.0f},
+    {"2", ACT_PRIMARY, 0, '2', EDGE_BOTTOM, -1.0f}, {"3", ACT_PRIMARY, 0, '3', EDGE_BOTTOM, -1.0f},
+    {"4", ACT_PRIMARY, 0, '4', EDGE_BOTTOM, -1.0f},
+};
+const BoardDesc kBottomPanelBoard = {
+    "fixture-bottom-panel", 240, 240, false, true, false, kFiveBottom, 5,
+};
+
+// True if this nub came from an auto-stacked (pos < 0) button. Only autos are
+// promised not to overlap each other; overlapping explicit positions are the
+// board author's own choice, so a blanket pairwise check would be wrong.
+bool is_auto(const BoardDesc* board, const NubLayout& n) {
+    return board->buttons[n.button].pos < 0.0f;
+}
+
 bool rects_overlap(const WinRect& a, const WinRect& b) {
     return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 }
@@ -191,7 +229,10 @@ TEST_CASE("every nub's hit rect stays inside the window, disjoint from the scree
     }
 }
 
-TEST_CASE("auto-stacked buttons spread evenly in the middle 60% and never overlap") {
+TEST_CASE("auto-stacked buttons spread evenly in the middle 60% when it is roomy enough") {
+    // Two autos on a 240 pt edge need 96 pt of pitch and the middle 60% is
+    // 144 pt, so the band stays exactly where it is - the widening below only
+    // engages when the count would not otherwise fit.
     WindowLayout l = window_layout(&kMixedBoard, 1);
     REQUIRE(l.nub_count == 4);
     float range_start = l.screen.y + 0.2f * l.screen.h;
@@ -207,6 +248,45 @@ TEST_CASE("auto-stacked buttons spread evenly in the middle 60% and never overla
     CHECK_FALSE(rects_overlap(auto_b.body, auto_c.body));
 }
 
+TEST_CASE("auto-stacked nubs stay disjoint as click targets, not just as drawn bodies") {
+    // What the user actually clicks is the hit rect, which is longer than the
+    // body by HIT_INFLATE on each side. sim_window dispatches to the first nub
+    // whose hit rect contains the point, so any overlap silently routes clicks
+    // to the lower-indexed button. Bodies checked too: overlapping bodies would
+    // also be visibly wrong.
+    struct Fixture { const BoardDesc* board; const char* why; };
+    const Fixture fixtures[] = {
+        {&kMixedBoard,         "2 autos on a 240 edge: roomy, disjoint either way"},
+        {&kFourAutoBoard,      "4 autos on a 240 edge: the densest stack that fits"},
+        {&kFourAutoTightBoard, "4 autos on a 180 edge: the shortest edge that fits them"},
+        {&kNineBoard,          "8 autos on a 480 edge, the MAX_LAYOUT_BUTTONS cap"},
+    };
+    for (const Fixture& f : fixtures) {
+        WindowLayout l = window_layout(f.board, 1);
+        REQUIRE(l.nub_count > 1);
+        for (int i = 0; i < l.nub_count; i++) {
+            for (int j = 0; j < i; j++) {
+                const NubLayout& a = l.nubs[j];
+                const NubLayout& b = l.nubs[i];
+                if (a.edge != b.edge) continue;
+                if (!is_auto(f.board, a) || !is_auto(f.board, b)) continue;
+                INFO(f.why);
+                CAPTURE(j);
+                CAPTURE(i);
+                CHECK_FALSE(rects_overlap(a.hit, b.hit));
+                CHECK_FALSE(rects_overlap(a.body, b.body));
+            }
+        }
+        // Widening the band must not push a nub off the edge it belongs to.
+        for (int i = 0; i < l.nub_count; i++) {
+            INFO(f.why);
+            CAPTURE(i);
+            CHECK(l.nubs[i].body.y >= l.screen.y);
+            CHECK(l.nubs[i].body.y + l.nubs[i].body.h <= l.screen.y + l.screen.h);
+        }
+    }
+}
+
 TEST_CASE("mixed explicit and auto buttons on one edge: autos ignore explicit siblings") {
     WindowLayout l = window_layout(&kMixedBoard, 1);
     REQUIRE(l.nub_count == 4);
@@ -220,6 +300,36 @@ TEST_CASE("mixed explicit and auto buttons on one edge: autos ignore explicit si
     CHECK_FALSE(rects_overlap(l.nubs[0].body, l.nubs[1].body));
     CHECK_FALSE(rects_overlap(l.nubs[1].body, l.nubs[2].body));
     CHECK_FALSE(rects_overlap(l.nubs[2].body, l.nubs[3].body));
+}
+
+TEST_CASE("a bottom-edge auto stack keeps clear of the panel opener in the corner") {
+    // more_nub sits in the bottom-right corner and sim_window hit-tests it
+    // before the buttons, so a stack that reaches into it loses those clicks
+    // to the panel rather than pressing the button drawn underneath.
+    WindowLayout l = window_layout(&kBottomPanelBoard, 1);
+    REQUIRE(l.more_nub.w > 0);        // the board is panel-capable
+    REQUIRE(l.nub_count == 5);
+    // Not vacuous: this stack is dense enough to use the fixed pitch, which is
+    // what carries it into the corner without the slide.
+    REQUIRE(l.nubs[1].body.x - l.nubs[0].body.x == NUB_LONG + 2 * HIT_INFLATE);
+
+    for (int i = 0; i < l.nub_count; i++) {
+        CAPTURE(i);
+        CHECK_FALSE(rects_overlap(l.nubs[i].hit, l.more_nub));
+        CHECK_FALSE(rects_overlap(l.nubs[i].body, l.more_nub));
+    }
+    // Sliding the stack must not push nubs onto each other or off the edge.
+    for (int i = 1; i < l.nub_count; i++) {
+        CAPTURE(i);
+        CHECK_FALSE(rects_overlap(l.nubs[i - 1].hit, l.nubs[i].hit));
+    }
+    // A stack this dense borrows the bezel strip left of the screen, so the
+    // bound that matters is the window: a hit rect past it is unreachable.
+    for (int i = 0; i < l.nub_count; i++) {
+        CAPTURE(i);
+        CHECK(l.nubs[i].hit.x >= l.window.x);
+        CHECK(l.nubs[i].hit.x + l.nubs[i].hit.w <= l.window.x + l.window.w);
+    }
 }
 
 TEST_CASE("a nub whose length would overflow its edge clamps inside the edge") {
