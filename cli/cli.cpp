@@ -222,6 +222,7 @@ static const std::string kSchema = std::string(R"JSON({
         { "name": "width", "description": "Screen width in px.", "type": "number" },
         { "name": "height", "description": "Screen height in px.", "type": "number" },
         { "name": "buttons", "description": "Physical button count.", "type": "number" },
+        { "name": "controls", "description": "Physical controls: label, edge (right/left/top/bottom), normalized position (-1 for automatic), and keyboard shortcut.", "type": "array" },
         { "name": "battery", "description": "Board has a battery.", "type": "boolean" },
         { "name": "rotation", "description": "Board supports rotation.", "type": "boolean" },
         { "name": "backend", "description": "native (runs in-process) or qemu (boots in a child QEMU process; serial/logs/serve only, and serve itself rejects --shot/--window/--ble-port there since there is no framebuffer or native BLE link - see backend_unavailable for the env var contract).", "type": "string" }
@@ -543,6 +544,20 @@ int esprite_main(int argc, char** argv) {
             if (want("width"))  o += "\"width\":" + std::to_string(t->board->width) + ",";
             if (want("height")) o += "\"height\":" + std::to_string(t->board->height) + ",";
             if (want("buttons"))o += "\"buttons\":" + std::to_string(t->board->button_count) + ",";
+            if (want("controls")) {
+                o += "\"controls\":[";
+                for (int b = 0; b < t->board->button_count; ++b) {
+                    const auto& control = t->board->buttons[b];
+                    const char* edges[] = {"right", "left", "top", "bottom"};
+                    const int edge = static_cast<int>(control.edge);
+                    if (b) o += ",";
+                    o += "{\"label\":\"" + json_esc(control.label) + "\",\"edge\":\"" +
+                         edges[edge >= 0 && edge < 4 ? edge : 0] + "\",\"position\":" +
+                         std::to_string(control.pos) + ",\"key\":\"" +
+                         json_esc(control.key ? std::string(1, control.key) : std::string()) + "\"}";
+                }
+                o += "],";
+            }
             if (want("battery"))o += std::string("\"battery\":") + jbool(t->board->has_battery) + ",";
             if (want("rotation"))o += std::string("\"rotation\":") + jbool(t->board->has_rotation) + ",";
             if (want("backend")) o += "\"backend\":\"" + std::string(t->backend == BACKEND_QEMU ? "qemu" : "native") + "\",";
@@ -1016,7 +1031,9 @@ int esprite_daemon(FILE* in, FILE* out, const char* default_target) {
         if (!install_qemu_boards_gated(&board_err)) return fail("bad_args", board_err, 2);
     }
     BackendShutdownGuard backend_guard;   // tests call esprite_daemon directly, bypassing esprite_main
-    char line[16384];
+    // Base64 display frames can exceed 40 KB. Keep requests bounded while
+    // accommodating framebuffer transfers through the same serial contract.
+    char line[131072];
     bool booted = false;
     bool is_qemu = false;
     // A pollable input stream (a real pipe/tty; memory streams report no fd

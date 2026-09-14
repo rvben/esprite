@@ -104,7 +104,7 @@ TEST_CASE("run session: an oversized line yields one error reply, not a desync")
     // Regression: a line beyond the read buffer was consumed as two commands,
     // producing two bad_json replies and desyncing request/reply pairing.
     std::string big = "{\"cmd\":\"snapshot\",\"data\":{\"pad\":\"";
-    big.append(20000, 'x');
+    big.append(140000, 'x');
     big += "\"}}\n";
     std::string out = run_daemon(
         "{\"cmd\":\"boot\",\"target\":\"cyd\"}\n" + big + "{\"cmd\":\"logs\"}\n");
@@ -168,4 +168,14 @@ TEST_CASE("run session: an invalid serial-expect regex is an error reply, not a 
         "{\"cmd\":\"logs\"}\n");
     CHECK(out.find("\"error\"") != std::string::npos);   // the bad regex is reported
     CHECK(out.find("\"serial\"") != std::string::npos);  // the session survives to answer logs
+}
+
+TEST_CASE("run session: serial accepts a complete base64 display frame") {
+    std::string frame(40000, 'A');
+    std::string out = run_daemon(
+        "{\"cmd\":\"boot\",\"target\":\"cyd\"}\n"
+        "{\"cmd\":\"serial\",\"sub\":\"send\",\"text\":\"" + frame + "\"}\n"
+        "{\"cmd\":\"logs\"}\n");
+    CHECK(reply_count(out) == 3);
+    CHECK(out.find("\"error\"") == std::string::npos);
 }

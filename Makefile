@@ -37,6 +37,8 @@ dist: release
 	NAME=esprite-$$VERSION-$$OS-$$ARCH; \
 	rm -rf dist/$$NAME; mkdir -p dist/$$NAME; \
 	cp $(RELEASE)/esprite LICENSE README.md dist/$$NAME/; \
+	mkdir -p dist/$$NAME/examples/html-studio; \
+	cp examples/html-studio/*.py examples/html-studio/*.html examples/html-studio/*.css examples/html-studio/*.js examples/html-studio/README.md dist/$$NAME/examples/html-studio/; \
 	tar -czf dist/$$NAME.tar.gz -C dist $$NAME; \
 	rm -rf dist/$$NAME; \
 	echo "dist/$$NAME.tar.gz"

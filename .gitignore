@@ -22,3 +22,7 @@ docs/specs/
 # Downloaded prebuilt QEMU binaries and QEMU test fixtures (not committed)
 .qemu/
 tests/fixtures/qemu/
+
+# Python example caches and optional persisted studio state
+__pycache__/
+html-state/

@@ -405,6 +405,13 @@ add_executable(sim_itests_lvgl_shim tests/itest_main.cpp tests/itest_lvgl_shim.c
 target_link_libraries(sim_itests_lvgl_shim PRIVATE cli_lib)
 
 enable_testing()
+find_package(Python3 3.9 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME html_studio COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_html_studio.py)
+    set_tests_properties(html_studio PROPERTIES
+        ENVIRONMENT "ESPRITE_TEST_RUNNER=$<TARGET_FILE:esprite>"
+        TIMEOUT 90)
+endif()
 add_test(NAME sim_tests COMMAND sim_tests)
 add_test(NAME sim_itests COMMAND sim_itests)
 if(TARGET sim_itests_daemon)

@@ -130,3 +130,36 @@ script. Pin both to the same version:
 esprite's own informational workflow (`.github/workflows/qemu.yml`) is a
 complete worked example of the caching (emulator tarball + docker-built
 images keyed on their input hashes).
+
+## Optional HTML front ends
+
+The SDL window is optional; an application can keep an HTML device view and
+use an Esprite runner as its backend. Run one persistent `esprite run` process
+per simulated device and serialize JSON request/reply transactions from a local
+HTTP bridge. Use `button`/`gpio` for physical controls, `serial send` for the
+firmware protocol, `steps` for virtual time, `logs` for captured events, and
+`screenshot` for the actual firmware framebuffer. Serve the completed PNG via
+an atomic file replacement so browser requests never see a partial capture.
+
+Keep the application-specific HTML, weather/data sources and firmware protocol
+adapter in the consumer project. This preserves its product design while
+Esprite supplies the same firmware execution backend used by headless tests
+and the SDL window. Bind the HTTP bridge to loopback, validate Host/Origin for
+mutating requests, use separate simulator storage, and label injected hardware
+values and unsupported peripherals explicitly. Do not label host-native audio
+or radio behavior as physically validated.
+
+Daemon requests are bounded at 128 KiB, allowing a complete 40 KiB base64
+frame in one `serial send` transaction. A larger request is rejected as one
+error and drained before the next request, preserving response pairing.
+
+A complete runnable bridge is included in [examples/html-studio](../examples/html-studio/README.md):
+
+```sh
+python3 examples/html-studio/server.py --runner ./build/esprite --target cyd
+```
+
+It discovers native display targets and their physical controls, serializes
+runner transactions, bounds requests and replies, handles runner failure and
+recovery, and serves a local HTML interface without third-party Python packages.
+Use `--runner` with a per-project executable to keep your firmware out of Esprite.

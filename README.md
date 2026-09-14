@@ -26,6 +26,19 @@ against the real **TFT_eSPI** library that runs unmodified. Supported display
 libraries: LVGL, Arduino_GFX, and TFT_eSPI, plus a touch bus (`sim_touch`) for
 non-LVGL sketches.
 
+## Optional HTML studio
+
+Use a browser alongside the CLI and SDL window. The included
+[HTML studio example](examples/html-studio/README.md) shows real firmware pixels,
+board buttons, touch input and serial output from any host-native display runner:
+
+```sh
+python3 examples/html-studio/server.py --runner ./build/esprite --target cyd
+```
+
+Open the printed local URL. Python 3.9+ is the only extra requirement. The example
+also ships in release tarballs; use `--runner ./esprite` from the extracted folder.
+
 ## Quick start
 
 ```bash
