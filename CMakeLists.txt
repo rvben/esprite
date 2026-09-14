@@ -421,6 +421,9 @@ if(TARGET sim_itests_daemon)
     add_test(NAME sim_itests_ui COMMAND sim_itests_ui)
 endif()
 add_test(NAME sim_itests_qemu COMMAND sim_itests_qemu)
+# This suite includes multiple guest boots and an existing 90-second Xtensa
+# deadline. A 90-second outer limit can kill valid runs before that gate fires.
+set_tests_properties(sim_itests_qemu PROPERTIES TIMEOUT 240)
 add_test(NAME sim_itests_lvgl_shim COMMAND sim_itests_lvgl_shim)
 
 endif()  # ESPRITE_BUILD_STANDALONE
