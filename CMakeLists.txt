@@ -407,6 +407,8 @@ target_link_libraries(sim_itests_lvgl_shim PRIVATE cli_lib)
 enable_testing()
 find_package(Python3 3.9 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
+    add_test(NAME cli_contract COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cli_contract.py)
+    set_tests_properties(cli_contract PROPERTIES ENVIRONMENT "ESPRITE_BINARY=$<TARGET_FILE:esprite>" TIMEOUT 60)
     add_test(NAME html_studio COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_html_studio.py)
     set_tests_properties(html_studio PROPERTIES
         ENVIRONMENT "ESPRITE_TEST_RUNNER=$<TARGET_FILE:esprite>"

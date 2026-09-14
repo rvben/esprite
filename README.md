@@ -1,352 +1,163 @@
 # esprite
 
-An ESP32 firmware simulator driven by an agent-device-style CLI, with two
-backends behind one contract:
+**Run your ESP32 firmware on your computer.**
+See its pixels. Drive its inputs. Test what happens next.
 
-- **Host-native (default):** boots ESP32 / Arduino firmware **compiled from
-  source** on your machine, renders the device display into an offscreen
-  framebuffer, and drives it: screenshots, input injection (GPIO, buttons,
-  touch), serial, and scripted scenarios. Fast, deterministic, no
-  cross-toolchain needed.
-- **QEMU (optional):** boots a **real compiled flash image** under Espressif's
-  QEMU fork and drives it through the same CLI: serial for any image, plus
-  screenshots and the live window for firmware built against the fork's
-  virtual RGB panel. See "The QEMU backend" below.
+Esprite gives firmware a local simulator with a CLI, an optional native window,
+and a browser studio. Compile your Arduino / ESP-IDF application against host
+shims for fast feedback, or run a compiled flash image with the optional QEMU
+backend. Your firmware does the drawing and handles the inputs.
 
-It is a reusable tool, not tied to any one app. A **firmware** is compiled once
-and is board-agnostic (it renders itself from `board_caps()` at runtime); a
-**board** target selects the panel it runs on. The first onboarded firmware is
-agentgauge, a Wi-Fi Claude usage-limit desk gauge, shown here on its Waveshare
-ESP32-S3-Touch-AMOLED-1.8 board (`waveshare_amoled_18`, 480x480). Three more
-targets show the breadth, all
-with zero app-specific sim code: `sample_gfx` (a generic Arduino_GFX sketch),
-and two takes on the Cheap Yellow Display (ESP32-2432S028R, 320x240) - `cyd`,
-an Arduino_GFX touch-paint demo, and `cyd_tft`, a touch-button UI written
-against the real **TFT_eSPI** library that runs unmodified. Supported display
-libraries: LVGL, Arduino_GFX, and TFT_eSPI, plus a touch bus (`sim_touch`) for
-non-LVGL sketches.
+![Esprite HTML studio running the included TFT_eSPI control demo, with its LED turned on by a touch at 80,100.](docs/images/html-studio.png)
 
-## Optional HTML studio
+*The included `cyd_tft` demo after a real touch injection. The screen is the
+firmware framebuffer, not an HTML recreation.*
 
-Use a browser alongside the CLI and SDL window. The included
-[HTML studio example](examples/html-studio/README.md) shows real firmware pixels,
-board buttons, touch input and serial output from any host-native display runner:
+## Try it in a minute
+
+On Apple Silicon macOS or x86-64 Linux:
 
 ```sh
-python3 examples/html-studio/server.py --runner ./build/esprite --target cyd
+brew install rvben/tap/esprite
+esprite list-targets
+python3 "$(brew --prefix esprite)/share/esprite/html-studio/server.py" \
+  --runner "$(command -v esprite)" --target cyd_tft
 ```
 
-Open the printed local URL. Python 3.9+ is the only extra requirement. The example
-also ships in release tarballs; use `--runner ./esprite` from the extracted folder.
+Open the local URL printed in your terminal. Tap **LED** on the display, press
+the board's **BOOT** button, pause execution, or save a PNG. Python 3.9+ is needed
+only for the browser studio; it uses the standard library with no extra packages.
 
-## Quick start
+Prefer a download? Extract a [release archive](https://github.com/rvben/esprite/releases),
+then run:
 
-```bash
-make build
-./build/esprite list-targets
-make screenshot TARGET=sample_gfx     # writes sample_gfx.png
-make screenshot TARGET=cyd_tft        # writes cyd_tft.png
-make test                             # unit + integration tests
-make install PREFIX=~/.local          # optimized build onto your PATH
+```sh
+python3 examples/html-studio/server.py --runner ./esprite --target cyd_tft
 ```
 
-Requirements: CMake >= 3.20 and a C++17 compiler (Apple clang or gcc/clang on
-Linux). LVGL and ArduinoJson are fetched automatically; doctest and stb are
-vendored.
+The crates.io and PyPI entries reserve the package name; they do not install
+the simulator. Use Homebrew, a release archive, or a source build.
 
-The `waveshare_amoled_18` target runs the agentgauge firmware, which lives in a separate
-checkout: without it the build skips the target (with a CMake warning) and
-everything else works. Point `-DAGENTGAUGE_SRC=/path/to/firmware/src` (or
-`make build AGENTGAUGE_SRC=...`) at it to enable it. Prebuilt release
-binaries carry the generic targets only, for the same reason.
+## Three ways to work
 
-## Screenshots
+| Interface | Best for | Start here |
+| --- | --- | --- |
+| **HTML studio** | Exploring firmware with touch, buttons, serial input and PNG export | [Studio guide](examples/html-studio/README.md) |
+| **CLI and JSON session** | Automated checks, screenshots and agent-driven testing | [CLI reference](docs/reference.md#cli) |
+| **Native SDL window** | A desktop device view with clickable bezel controls | `esprite serve --target cyd_tft --window` |
 
-The `waveshare_amoled_18` target boots the real agentgauge firmware, so injecting a limits snapshot
-drives the genuine data path (HTTP POST to the on-device server, parsed by the
-firmware's own handler) and the real UI updates:
+The studio discovers each runner's physical controls. Pause and step firmware,
+switch targets, inspect serial output, or inject battery values when the board
+supports them. It binds to loopback and serves its own assets locally.
 
-```bash
-./build/esprite snapshot \
-  '{"lim":1,"s5":42,"s5r":180,"s7":10,"s7r":6000}' \
-  --target waveshare_amoled_18 --shot limits.png
+## Your firmware, your front end
+
+Keep your application in its own repository. Esprite provides CMake helpers to
+build a project-specific runner, so you can retain your own product UI or use
+the generic HTML studio without modifying Esprite.
+
+![Paperplane's own HTML studio displaying a synthetic weather forecast on the real NOTE4 firmware framebuffer, including the side buttons.](docs/images/paperplane.png)
+
+*Paperplane is a separate e-paper desk-companion application. This capture uses
+synthetic weather in an isolated offline demo—no personal location, network
+names, recordings, or device identifiers. Paperplane is not bundled in Esprite.*
+
+The integration compiles Paperplane's actual C++ application, canvas renderer
+and panel adapter. Its browser front end exchanges JSON with an Esprite runner;
+there is no second implementation of its focus timer or device drawing code.
+Read the [reference application pattern](docs/reference-app.md) for the boundary
+between shared firmware, the browser bridge and physical hardware tests.
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(esprite
+  GIT_REPOSITORY https://github.com/rvben/esprite.git
+  GIT_TAG v0.5.0)
+FetchContent_MakeAvailable(esprite)
+
+esprite_add_sim_target(my_board board.cpp sketch.cpp)
+esprite_add_runner(my_sim TARGET my_board)
 ```
 
-## Live window
+A board profile supplies display dimensions and input capabilities; `sketch.cpp`
+supplies `setup()` and `loop()`. The [onboarding guide](docs/onboarding.md) covers
+standard Arduino sketches, application HAL adapters and QEMU board profiles.
+The [integration guide](docs/integration.md) covers consumer builds and CI.
 
-For an interactive, iOS-Simulator-style view, run `serve` with `--window`:
+## Make a behavior reproducible
 
-```bash
-esprite serve --target waveshare_amoled_18 --port 8080 --window
-```
+Each one-shot command boots a fresh target. Use `run` to keep one firmware
+session alive across commands:
 
-This opens a native SDL2 window: the device screen, pixel-exact, inside a slim
-device bezel. The board's physical buttons appear as clickable nubs on the
-bezel edge at their declared positions (each target's `board.cpp` places
-them); hover a nub for its label and keyboard shortcut, press `?` for the
-full key list, and press `` ` `` (backtick) for the hardware-controls panel
-(battery level and charging/USB toggles, rotation) on boards that have them.
-**Mouse on the screen** = touch (click and drag); each button also has a
-board-declared key (waveshare_amoled_18: **space** = PRIMARY, **tab** = SECONDARY,
-**p** = PWR); **Esc** closes an open overlay, then quits. PWR follows the
-hardware's hold semantics: a quick press or click is a short press; holding
-past 1.5 s emits the long-press edge (for a firmware's hold-release gesture).
-Bezel chrome renders at desktop density, so `--scale N` enlarges the screen
-without blowing up the controls. Ctrl-C stops `serve` cleanly.
-
-For BLE firmwares, `serve --ble-port N` additionally exposes the virtual BLE
-link as newline-delimited JSON on a localhost TCP socket: connecting acts as a
-bonded central, lines written go to the device, and the device's lines stream
-back. Any host process (a companion app via a small adapter, a script, even
-`nc`) can drive the simulated device live (point `--target` at a BLE firmware
-that binds the virtual link):
-
-```bash
-esprite serve --target <ble-firmware-target> --ble-port 9091 --window &
-printf '{"cmd":"status"}\n' | nc 127.0.0.1 9091
-``` Point a live bridge at
-the same port and the real data updates in the window in real time.
-
-The window is optional: it is only compiled when SDL2 is found at configure time
-(`brew install sdl2` on macOS). Without SDL2, everything else builds and runs
-headless, and `--window` prints a hint. `--scale N` enlarges the window N times.
-
-## CLI
-
-```
-esprite <command> [--target NAME] [args]
-
-list-targets                     list onboarded targets
-schema                           machine-readable JSON of all commands
---version                        print name and version
-ui                               snapshot the LVGL widget tree (refs for tap --ref)
-screenshot OUT.png [--steps N]   boot, run, write a PNG
-snapshot '<json>' [--path P] [--shot OUT]   POST to the device webserver
-tap X Y | tap --ref eN [--shot OUT]         inject a touch
-button primary|secondary|pwr [--shot OUT]   press a button; pwr-long / pwr-release
-                                 inject the power button's hold-gesture edges
-battery PCT [--charging] [--no-vbus] [--shot OUT]
-rotate 0..3 [--shot OUT]         set IMU rotation quadrant
-motion [--shot OUT]              inject one accelerometer wake nudge (needs an IMU board)
-gpio PIN LEVEL                   set a GPIO level
-ble connect|pair|disconnect|send|recv|hid   drive a BLE firmware's virtual link
-                                 (connect [--passkey N], send '<json>', recv lines,
-                                 hid captured keyboard reports)
-serial send 'TEXT'               feed the device serial input
-serial expect 'REGEX'            match against captured serial output
-logs                             print captured serial output
-scenario FILE.json               run a scripted scenario
-serve [--window] [--scale N]     boot and keep pumping for a live bridge; --window
-                                 opens an interactive SDL window (mouse/keys drive it)
-run                              daemon: newline-delimited JSON commands on stdin
-```
-
-Errors are structured (`{"error":{"kind":...,"message":...}}` on stderr) with
-documented exit codes per kind; see `esprite schema`.
-
-Scenarios are ordered JSON steps, useful in CI:
-
-```json
-{
-  "target": "waveshare_amoled_18",
-  "steps": [
-    { "cmd": "screenshot", "out": "01-waiting.png" },
-    { "cmd": "snapshot", "data": {"lim":1,"s5":42,"s5r":180,"s7":10,"s7r":6000} },
-    { "cmd": "screenshot", "out": "02-limits.png" }
-  ]
-}
-```
-
-## Driving it (agent-facing)
-
-`esprite schema` prints the machine-readable clispec contract (commands, args,
-output fields, error kinds, exit codes). Commands emit JSON on stdout; logs go to
-stderr.
-
-For LVGL targets there is a **snapshot-ref model** like a browser page snapshot:
-
-```bash
-esprite ui --target waveshare_amoled_18
-# [{"ref":"e6","type":"bar","x":36,"y":168,"w":408,"h":24,"value":42}, ...]
-esprite tap --ref e6 --target waveshare_amoled_18   # tap that widget, not a pixel
-```
-
-`ui` returns the live widget tree (refs, type, coords, text, bar/arc values), so
-an agent reads the UI structurally instead of guessing pixels. `tap --ref` acts
-on a ref; `tap X Y` is the pixel fallback.
-
-The `run` daemon is a persistent session where refs from `ui` stay valid across
-the session (one boot per session; `steps` advances virtual time explicitly):
-
-```
-{"cmd":"boot","target":"waveshare_amoled_18"}
-{"cmd":"snapshot","data":{"lim":1,"s5":42,"s5r":180,"s7":10,"s7r":6000}}
-{"cmd":"ui"}                              # read the updated tree, get refs
-{"cmd":"tap","ref":"e6"}                  # act on a ref
-{"cmd":"steps","n":50}                    # run 50 loop() iterations
-{"cmd":"screenshot","out":"out.png"}
+```sh
+esprite run <<'JSON'
+{"cmd":"boot","target":"cyd_tft"}
+{"cmd":"tap","x":80,"y":100}
+{"cmd":"screenshot","out":"led-on.png"}
+{"cmd":"logs"}
 {"cmd":"quit"}
+JSON
 ```
 
-Raw-GFX targets (no widget tree) return `[]` from `ui` and are driven by pixels +
-screenshots.
+You get one JSON reply per input line. Screenshots contain the actual pixels;
+LVGL targets also expose a widget tree through `ui` and accept `tap --ref eN`.
+For CI, store ordered steps in a [scenario](docs/integration.md) and assert
+serial output or framebuffer pixels.
 
-## The QEMU backend
+`esprite schema` describes commands, output fields, retry effects, pagination,
+errors and non-error outcomes using [CLI Spec 0.3](https://clispec.dev/schema/v0.3.json).
+Global options work before or after the command. List output defaults to 100
+items and supports `--limit`, `--offset` and exact `--fields` selection.
+Commands that boot arbitrary firmware are conservatively marked non-idempotent:
+repeating them may update persistent simulated state or repeat an input.
+These CLI contract improvements are in source after v0.5.0.
 
-Every target above runs host-native. The `qemu_esp32c3` target instead boots a
-real ESP32-C3 flash image under Espressif's QEMU fork. It sees what the
-host-native backend cannot: the real RTOS scheduler, real heap pressure,
-watchdogs, binary-only components, and it runs images you did not build
-yourself.
+## Choose the right backend
 
-```bash
-make qemu-fetch        # pinned prebuilt Espressif QEMU (no source build)
-ESPRITE_QEMU_IMAGE=path/to/flash.bin \
-  ./build/esprite serial expect 'Hello world' --target qemu_esp32c3
-make qemu-fixtures     # scripted demo images (needs docker + arduino-cli)
-make qemu-test         # gated integration tests (self-skip without QEMU)
+| | Host-native | QEMU |
+| --- | --- | --- |
+| Input | Firmware source compiled for your computer | ESP32 flash image |
+| Useful for | Application logic, rendering, parsing, quick regression checks | Running the target architecture, RTOS and binary components |
+| Display libraries | LVGL, Arduino_GFX, TFT_eSPI | Firmware using Espressif's virtual RGB panel |
+| Inputs | Buttons, GPIO, touch; other peripherals depend on the board | Serial; touch/GPIO need the cooperating input agent |
+| Browser studio | Yes | Use the CLI or SDL window |
+| Timing | Virtual firmware steps | ESP32-C3 icount; Xtensa wall-clock timing |
+
+Neither backend reproduces the physical radio, speaker, microphone, battery
+life, or e-paper panel electronics. Simulated sleep is a lifecycle test, not a
+power measurement. Keep on-device checks for those behaviors.
+
+[QEMU setup, capabilities and examples →](docs/reference.md#the-qemu-backend)
+
+## Build and test
+
+Requires CMake 3.20+, a C++17 compiler and Git. CMake fetches pinned LVGL and
+ArduinoJson sources; doctest and stb are vendored. SDL2 is optional.
+
+```sh
+git clone https://github.com/rvben/esprite.git
+cd esprite
+make build
+make test
+./build/esprite screenshot demo.png --target cyd_tft
 ```
 
-Tier 1 (any image): `serial`, `logs`, and headless `serve` work; every other
-command degrades explicitly to `unsupported`, exactly like a board without a
-battery rejects `battery`. Execution is deterministic on ESP32-C3 (icount:
-same image, same serial bytes, every run); ESP32/S3 (Xtensa) run wall-clock
-only in the current fork release. `list-targets` reports each target's
-`backend`, and a missing emulator or image yields the `backend_unavailable`
-error kind with the missing piece named.
+The public build includes `sample_gfx`, `cyd` and `cyd_tft`. No separate firmware
+checkout is required. The optional agentgauge target requires its own source;
+see the onboarding guide. QEMU integration tests require the
+[emulator and fixtures](docs/reference.md#the-qemu-backend); they skip when those
+are unavailable.
 
-Tier 2 (cooperating firmware) adds the display and input: build the firmware
-against Espressif's `esp_lcd_qemu_rgb` component and boot it on
-`qemu_esp32c3_rgb` (320x240 virtual RGB panel), and `screenshot`,
-`serve --shot`, and the live `--window` work exactly as on native targets,
-fed by QMP screendump. Draw full frames: the virtual panel consumes one
-pending draw per host-side capture, so per-line drawing stalls headless
-firmware.
+The suite covers the CLI contract, daemon recovery, HTML bridge lifecycle,
+framebuffer rendering, GPIO behavior, LVGL flushes and optional QEMU fixtures.
+Run `clispec score ./build/esprite` separately when the CLI Spec checker is installed.
 
-Input is the same cooperation model: the firmware runs esprite's tiny
-`esprite_qemu_agent` component (tools/qemu/esprite_qemu_agent, one task on
-UART1), and `tap`, `swipe`, `gpio`, and `button` inject through it - the
-fork emulates no GPIO or touch hardware, so the firmware polls the agent's
-APIs (`esprite_agent_touch_events`, `esprite_agent_gpio_events`) instead of
-the hardware drivers. `scenario` runs on qemu targets too: `settle` is the
-portable time verb, and the `pixel` step (a framebuffer assertion with a
-retry deadline) plus byte-exact screenshot goldens make emulator UI tests
-deterministic; see `scenarios/qemu_esp32c3_rgb.json` for a
-tap-press-and-post example against the bundled fixture.
+## Go further
 
-Networking closes the loop: the machine emulates an OpenCores ethernet, and
-a board spec with `"http": {"guest_port": N}` gets user-mode networking with
-a localhost port forwarded into the guest, so `snapshot` POSTs into the
-firmware's real HTTP server (lwIP over the emulated NIC; build with
-`CONFIG_ETH_USE_OPENETH=y`). `serve` prints the forwarded URL for live
-bridges.
+- [Add a firmware project](docs/onboarding.md)
+- [Embed Esprite in your build and CI](docs/integration.md)
+- [Customize the HTML studio](examples/html-studio/README.md)
+- [CLI, native window and QEMU reference](docs/reference.md)
+- [Reproduce the documentation screenshots](docs/screenshots.md)
 
-Qemu targets are data, not code: `targets/qemu/*.json` (key, machine, arch,
-optional display dimensions, agent flag, buttons, http capability) ship
-inside the binary, and `ESPRITE_QEMU_BOARD=/path/to/board.json` registers
-your own board at runtime without a rebuild. Board-spec buttons render as
-bezel nubs in `--window` (view-only on qemu: window clicks do not route
-through the agent yet).
-
-### Running a real LVGL app under the emulator
-
-`tools/qemu/lvgl_demo` is a genuine LVGL 9 application (a two-screen device
-control panel) proving the recipe end to end - same board spec as the rgb
-fixture, different image (`ESPRITE_QEMU_IMAGE` selects the firmware):
-
-- Registry deps: `lvgl/lvgl ^9`, `espressif/esp_lvgl_port ^2`,
-  `espressif/esp_lcd_qemu_rgb ^1`; esprite components:
-  `esprite_qemu_agent` (input transport) and `esp_lcd_touch_esprite` (the
-  standard `esp_lcd_touch` driver contract over the agent, so touch reaches
-  LVGL through a normal indev driver, no esprite-specific app code).
-- Display rule: full-refresh mode with a single static full-frame buffer
-  (the emulated panel consumes one draw per host capture; partial flushes
-  stall). On RAM-tight chips allocate the buffer statically and wire
-  `lv_display_create`/`set_buffers`/`set_flush_cb` yourself -
-  `lvgl_port_add_disp` only heap-allocates - keeping `esp_lvgl_port` for
-  task, tick, and locking.
-- esprite pumps display captures around every injection, so a UI task
-  blocked in a flush still observes taps; `scenarios/qemu_esp32c3_rgb_lvgl.json`
-  taps its switch and slider, presses BOOT, and byte-compares the frames.
-
-## What each backend is authoritative for
-
-The two backends answer different questions. Host-native compiles the
-firmware's source against shims: it is the fast, deterministic authority on
-the app's own behavior, and it can see inside (the `ui` snapshot-ref model
-walks the live LVGL tree). QEMU runs the real compiled image: it is the
-authority on everything below the app that shims cannot reproduce, at the
-cost of wall-clock timing and firmware cooperation for anything beyond
-serial.
-
-| Capability | Host-native | QEMU tier 1 (any image) | QEMU tier 2 (cooperating firmware) |
-|---|---|---|---|
-| App logic, UI rendering, data parsing | authoritative | runs, observable via serial | runs, observable via display |
-| RTOS scheduling, heap/stack pressure, watchdogs | not visible | authoritative | authoritative |
-| Toolchain/arch bugs, binary-only components, unbuildable images | no | yes | yes |
-| Serial, logs | yes | yes | yes |
-| Display (`screenshot`, `serve --shot/--window`) | yes | no | yes (`esp_lcd_qemu_rgb`) |
-| Input (`tap`, `swipe`, `gpio`, `button`) | yes | no | yes (`esprite_qemu_agent`) |
-| HTTP `snapshot` | yes | no | yes (openeth + port forward) |
-| `ui` widget refs | yes | no | no (out of process, inherent) |
-| BLE (virtual link, `--ble-port`) | yes | no | no (not emulated upstream) |
-| `battery`, `rotate`, `motion` | yes | no | no |
-| Time control | `steps` (exact loop iterations) | `settle` (wall-clock) | `settle` (wall-clock) |
-| Determinism | fully deterministic (virtual clock) | ESP32-C3: byte-exact serial across runs; ESP32/S3: wall-clock, load-sensitive | same per architecture |
-| Boot speed | milliseconds | seconds | seconds |
-
-Tier 2 is a firmware choice, not an esprite switch: build against the
-QEMU-facing components listed above and declare the matching capabilities in
-the board spec. Anything a target cannot do fails as `unsupported` with the
-missing piece named, never silently.
-
-## How it works
-
-The firmware's own source files are compiled unchanged. Only two things are
-swapped: a set of host shims that stand in for the Arduino / ESP-IDF APIs, and a
-board layer that binds the app's hardware calls to virtual peripherals.
-
-```
-core/          virtual clock + setup()/loop() pump + target registry +
-               the SimBackend seam (native vs qemu)
-shims/         Arduino, ESP-IDF, and networking APIs (host-backed)
-peripherals/   framebuffer + PNG screenshot, LVGL glue, Arduino_GFX shim,
-               injected input bus
-backends/      the QEMU backend: child process driven over QMP + stdio serial
-cli/           the esprite CLI
-targets/       one folder per onboarded app
-```
-
-The runtime is single-threaded and deterministic: `millis()` is driven by
-`delay()` and the step count, so a given number of `loop()` iterations always
-produces the same frame. Injected input and data are applied between steps.
-
-## Onboarding and project integration
-
-Two guides cover adoption end to end:
-
-- **[docs/onboarding.md](docs/onboarding.md)** - adding your firmware: the
-  zero-adapter path for standard sketches, the HAL-adapter path for real
-  products (firmware compiled once, boards as small profiles), and QEMU
-  board specs as JSON (no esprite changes at all).
-- **[docs/integration.md](docs/integration.md)** - using esprite as a test
-  harness inside your firmware repo: the Makefile pattern, the scenario step
-  reference, driving it from agents (`schema`, the `run` session, widget
-  refs), and worked CI examples for both backends.
-
-## Host-native approximations
-
-The host-native backend compiles source against shims, so some things are
-approximated by design: virtual time rather than RTOS scheduling; instant
-faked Wi-Fi and BLE with no real radio (no MTU fragmentation, advertising
-intervals, or bonding storage); no QSPI or panel electrical quirks; no PSRAM
-exhaustion; audio is silent. Neither backend substitutes for on-hardware QA
-of timing, radio, or panel electrical behavior - the matrix above says which
-backend to trust for everything else.
-
-## Notes
-
-- LVGL is pinned to 9.5.0 for a stable core API surface. LVGL-based targets
-  currently share one LVGL version across the build.
-- The agentgauge firmware source is referenced read-only from
-  `../agentgauge/firmware/src`; override with `-DAGENTGAUGE_SRC=...`.
+Esprite is MIT licensed. Dependencies retain their own licenses.

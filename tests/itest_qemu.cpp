@@ -167,7 +167,18 @@ TEST_CASE("C3 rgb fixture: screendump captures the quadrant pattern") {
                      "fixture never started drawing; last 300 chars: ", tail(out));
     std::string dump = sock.substr(0, sock.rfind('/')) + "/screen.ppm";
     std::string result, qerr;
-    REQUIRE_MESSAGE(p.qmp.execute("screendump", "{\"filename\":\"" + dump + "\"}", &result, &qerr), qerr);
+    // The serial marker precedes the actual draw submission. A capture can
+    // arrive in that gap and return black without releasing the pending frame.
+    // Keep consuming frames until the guest confirms its draw completed; just
+    // pumping serial cannot unblock a draw queued after an early screendump.
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+    do {
+        REQUIRE_MESSAGE(p.qmp.execute("screendump", "{\"filename\":\"" + dump + "\"}", &result, &qerr), qerr);
+        p.pump();
+        out = p.serial_output();
+        if (out.find("rgb_demo state touch=0 inv=0") != std::string::npos) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    } while (std::chrono::steady_clock::now() < deadline);
     FILE* f = fopen(dump.c_str(), "rb");
     REQUIRE(f != nullptr);
     std::string ppm;
@@ -176,8 +187,7 @@ TEST_CASE("C3 rgb fixture: screendump captures the quadrant pattern") {
     while ((n = fread(buf, 1, sizeof(buf), f)) > 0) ppm.append(buf, n);
     fclose(f);
     unlink(dump.c_str());
-    // The dump also released the guest: the post-draw state marker follows.
-    out = pump_until(p, "rgb_demo state touch=0 inv=0", 15000);
+    // Require both the post-draw marker and the actual quadrant pixels.
     p.stop();
     CHECK_MESSAGE(out.find("rgb_demo state touch=0 inv=0") != std::string::npos,
                    "screendump did not release the guest; last 300 chars: ", tail(out));

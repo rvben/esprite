@@ -201,34 +201,37 @@ static std::string qemu_unsupported_msg(const std::string& cmd, const std::strin
 #endif
 
 static const std::string kSchema = std::string(R"JSON({
-  "clispec": "0.2",
+  "clispec": "0.3",
   "name": "esprite",
   "version": ")JSON") + ESPRITE_VERSION + R"JSON(",
   "description": "Host-native ESP32 simulator. Boots a target's firmware, renders its UI, and drives it: snapshot-ref UI reads, input injection, screenshots, and a persistent JSON session. Results are JSON on stdout; logs go to stderr.",
+  "output": {"tty": "text", "piped": "json"},
+  "outcomes": [{"name": "no_match", "description": "serial expect found no match; stdout contains matched:false.", "code": 1}],
   "global_args": [
     { "name": "--output", "description": "Output format. auto = text on a TTY, JSON when piped.", "type": "string", "enum": ["auto", "json", "text"], "default": "auto" },
     { "name": "--json", "description": "Shorthand for --output json.", "type": "boolean" },
     { "name": "--version", "description": "Print name and version.", "type": "boolean" },
     { "name": "--target", "description": "Target to boot (see list-targets). Optional when exactly one is registered.", "type": "string" },
-    { "name": "--limit", "description": "Max items to return from list commands (list-targets, ui).", "type": "number" },
+    { "name": "--limit", "description": "Max items to return from list commands (list-targets, ui). Default 100.", "type": "number" },
     { "name": "--offset", "description": "Items to skip from list commands (pagination).", "type": "number" },
-    { "name": "--fields", "description": "Comma-separated fields to include from list-targets items.", "type": "string" }
+    { "name": "--fields", "description": "Comma-separated exact fields to include from list-targets or ui items.", "type": "string" }
   ],
   "commands": [
-    { "name": "schema", "description": "Print this clispec contract as JSON.", "mutating": false, "stability": "stable" },
-    { "name": "list-targets", "description": "List onboarded targets with board metadata.", "mutating": false, "stability": "stable",
+    { "name": "schema", "description": "Print this clispec contract as JSON.", "mutating": false, "stability": "stable", "effects": "read_only", "cardinality": "single", "stdout_schema": {"$ref": "https://clispec.dev/schema/v0.3.json"} },
+    { "name": "list-targets", "description": "List onboarded targets with board metadata.", "mutating": false, "stability": "stable", "effects": "read_only", "cardinality": "unbounded", "pagination": {"style": "offset", "limit_arg": "--limit", "offset_arg": "--offset"}, "fields_arg": "--fields",
+      "example": {"args": ["--limit", "3"], "stdin": ""},
       "output_fields": [
+        {"name": "name", "description": "Board display name.", "type": "string"},
         { "name": "key", "description": "Target id to pass to --target.", "type": "string" },
         { "name": "width", "description": "Screen width in px.", "type": "number" },
         { "name": "height", "description": "Screen height in px.", "type": "number" },
         { "name": "buttons", "description": "Physical button count.", "type": "number" },
-        { "name": "controls", "description": "Physical controls: label, edge (right/left/top/bottom), normalized position (-1 for automatic), and keyboard shortcut.", "type": "array" },
+        { "name": "controls", "description": "Physical controls: label, edge (right/left/top/bottom), normalized position (-1 for automatic), and keyboard shortcut.", "type": "array", "items": {"type": "object", "fields": [{"name":"label","type":"string"},{"name":"edge","type":"string"},{"name":"position","type":"number"},{"name":"key","type":"string"}]} },
         { "name": "battery", "description": "Board has a battery.", "type": "boolean" },
         { "name": "rotation", "description": "Board supports rotation.", "type": "boolean" },
         { "name": "backend", "description": "native (runs in-process) or qemu (boots in a child QEMU process; serial/logs/serve only, and serve itself rejects --shot/--window/--ble-port there since there is no framebuffer or native BLE link - see backend_unavailable for the env var contract).", "type": "string" }
       ] },
-    { "name": "ui", "description": "Snapshot the active LVGL widget tree as an array of elements; act on the refs with 'tap --ref'. Empty for non-LVGL targets.", "mutating": false, "stability": "stable",
-      "example": { "args": ["--target", "waveshare_amoled_18"], "stdin": "" },
+    { "name": "ui", "description": "Snapshot the active LVGL widget tree as an array of elements; act on the refs with 'tap --ref'. Empty for non-LVGL targets.", "mutating": true, "stability": "stable", "effects": "non_idempotent", "cardinality": "unbounded", "pagination": {"style": "offset", "limit_arg": "--limit", "offset_arg": "--offset"}, "fields_arg": "--fields",
       "output_fields": [
         { "name": "ref", "description": "Stable element handle, e.g. e3.", "type": "string" },
         { "name": "type", "description": "label|bar|arc|button|image|line|obj.", "type": "string" },
@@ -237,7 +240,7 @@ static const std::string kSchema = std::string(R"JSON({
         { "name": "text", "description": "Label text, when present.", "type": "string" },
         { "name": "value", "description": "Bar/arc value, when present.", "type": "number" }
       ] },
-    { "name": "screenshot", "description": "Boot, render, and write a PNG of the device screen. Works on native targets and on qemu targets whose board spec declares a display (the firmware must drive esp_lcd_qemu_rgb; capture polls the guest panel via QMP screendump).", "mutating": false, "stability": "stable",
+    { "name": "screenshot", "description": "Boot, render, and write a PNG of the device screen. Works on native targets and on qemu targets whose board spec declares a display (the firmware must drive esp_lcd_qemu_rgb; capture polls the guest panel via QMP screendump).", "mutating": true, "stability": "stable", "effects": "non_idempotent", "cardinality": "single",
       "args": [ { "name": "out", "description": "Output PNG path (default esprite.png).", "type": "string", "required": false } ],
       "example": { "args": ["out.png", "--target", "waveshare_amoled_18"], "stdin": "" },
       "output_fields": [
@@ -246,10 +249,10 @@ static const std::string kSchema = std::string(R"JSON({
         { "name": "w", "description": "Width.", "type": "number" },
         { "name": "h", "description": "Height.", "type": "number" }
       ] },
-    { "name": "snapshot", "description": "POST a JSON body to the device's /snapshot HTTP endpoint (data the firmware parses). Native targets receive it on the in-process webserver; qemu targets whose board spec declares an http capability receive it through a user-net port forward into the emulated NIC (firmware must serve HTTP over openeth).", "mutating": true, "stability": "stable",
+    { "name": "snapshot", "description": "POST a JSON body to the device's /snapshot HTTP endpoint (data the firmware parses). Native targets receive it on the in-process webserver; qemu targets whose board spec declares an http capability receive it through a user-net port forward into the emulated NIC (firmware must serve HTTP over openeth).", "mutating": true, "stability": "stable", "effects": "non_idempotent", "cardinality": "single", "output_fields": [{"name": "ok", "type": "boolean"}],
       "args": [ { "name": "json", "description": "Wire JSON to POST.", "type": "string", "required": true } ],
       "example": { "args": ["{\"lim\":1,\"s5\":42}", "--target", "waveshare_amoled_18"], "stdin": "" } },
-    { "name": "tap", "description": "Inject a touch, by widget ref (--ref e3, from ui) or by pixel (x y).", "mutating": true, "stability": "stable",
+    { "name": "tap", "description": "Inject a touch, by widget ref (--ref e3, from ui) or by pixel (x y).", "mutating": true, "stability": "stable", "effects": "non_idempotent", "cardinality": "single",
       "args": [
         { "name": "x", "description": "X pixel (omit when using --ref).", "type": "number", "required": false },
         { "name": "y", "description": "Y pixel.", "type": "number", "required": false }
@@ -260,7 +263,7 @@ static const std::string kSchema = std::string(R"JSON({
         { "name": "x", "description": "Resolved x.", "type": "number" },
         { "name": "y", "description": "Resolved y.", "type": "number" }
       ] },
-    { "name": "swipe", "description": "Inject a swipe from (x1,y1) to (x2,y2) as a moving press, so LVGL registers a gesture (e.g. page navigation).", "mutating": true, "stability": "stable",
+    { "name": "swipe", "description": "Inject a swipe from (x1,y1) to (x2,y2) as a moving press, so LVGL registers a gesture (e.g. page navigation).", "mutating": true, "stability": "stable", "effects": "non_idempotent", "cardinality": "single",
       "args": [
         { "name": "x1", "description": "Start X pixel.", "type": "number", "required": true },
         { "name": "y1", "description": "Start Y pixel.", "type": "number", "required": true },
@@ -271,49 +274,45 @@ static const std::string kSchema = std::string(R"JSON({
       "output_fields": [
         { "name": "ok", "description": "Swipe injected.", "type": "boolean" }
       ] },
-    { "name": "battery", "description": "Set battery level; --charging and --no-vbus set the flags.", "mutating": true, "stability": "stable",
+    { "name": "battery", "description": "Set battery level; --charging and --no-vbus set the flags.", "mutating": true, "stability": "stable", "effects": "non_idempotent", "cardinality": "single", "output_fields": [{"name": "ok", "type": "boolean"}, {"name": "pct", "type": "number"}, {"name": "charging", "type": "boolean"}, {"name": "vbus", "type": "boolean"}],
       "args": [ { "name": "pct", "description": "0-100.", "type": "number", "required": true } ],
       "example": { "args": ["50", "--target", "waveshare_amoled_18"], "stdin": "" } },
-    { "name": "rotate", "description": "Set the IMU rotation quadrant (0-3).", "mutating": true, "stability": "stable",
+    { "name": "rotate", "description": "Set the IMU rotation quadrant (0-3).", "mutating": true, "stability": "stable", "effects": "non_idempotent", "cardinality": "single", "output_fields": [{"name": "ok", "type": "boolean"}, {"name": "quadrant", "type": "number"}],
       "args": [ { "name": "quadrant", "description": "0-3.", "type": "number", "required": true } ],
       "example": { "args": ["1", "--target", "waveshare_amoled_18"], "stdin": "" } },
-    { "name": "motion", "description": "Inject one accelerometer wake nudge, consumed by the firmware's next motion poll. Requires a board with an IMU (has_imu).", "mutating": true, "stability": "stable",
+    { "name": "motion", "description": "Inject one accelerometer wake nudge, consumed by the firmware's next motion poll. Requires a board with an IMU (has_imu).", "mutating": true, "stability": "stable", "effects": "non_idempotent", "cardinality": "single", "output_fields": [{"name": "ok", "type": "boolean"}],
       "example": { "args": ["--target", "waveshare_amoled_18"], "stdin": "" } },
-    { "name": "gpio", "description": "Set a GPIO pin level (read back by digitalRead).", "mutating": true, "stability": "stable",
+    { "name": "gpio", "description": "Set a GPIO pin level (read back by digitalRead).", "mutating": true, "stability": "stable", "effects": "non_idempotent", "cardinality": "single", "output_fields": [{"name": "ok", "type": "boolean"}, {"name": "pin", "type": "number"}, {"name": "level", "type": "number"}],
       "args": [
         { "name": "pin", "description": "GPIO number.", "type": "number", "required": true },
         { "name": "level", "description": "0 or 1.", "type": "number", "required": true }
       ],
       "example": { "args": ["9", "1", "--target", "waveshare_amoled_18"], "stdin": "" } },
-    { "name": "wifi", "description": "Set the simulated Wi-Fi link up or down (read back by WiFi.status()); does not affect first-time provisioning.", "mutating": true, "stability": "stable",
+    { "name": "wifi", "description": "Set the simulated Wi-Fi link up or down (read back by WiFi.status()); does not affect first-time provisioning.", "mutating": true, "stability": "stable", "effects": "non_idempotent", "cardinality": "single", "output_fields": [{"name": "ok", "type": "boolean"}, {"name": "state", "type": "string"}],
       "args": [ { "name": "state", "description": "up or down.", "type": "string", "required": true, "enum": ["up", "down"] } ],
       "example": { "args": ["down", "--target", "waveshare_amoled_18"], "stdin": "" } },
-    { "name": "ble", "description": "Drive the virtual BLE link of a BLE firmware, standing in for a central/host app. One-shot `ble send` completes the round trip itself: it connects (bonded), delivers the JSON line, and returns the device's replies (add --shot to capture the resulting frame). connect/pair (passkey pairing via --passkey N), disconnect, recv, and hid hold state across commands only inside a run session or scenario. Requires a target whose firmware binds the virtual BLE link; returns bad_args otherwise.", "mutating": true, "stability": "stable",
+    { "name": "ble", "description": "Drive the virtual BLE link of a BLE firmware, standing in for a central/host app. One-shot `ble send` completes the round trip itself: it connects (bonded), delivers the JSON line, and returns the device's replies (add --shot to capture the resulting frame). connect/pair (passkey pairing via --passkey N), disconnect, recv, and hid hold state across commands only inside a run session or scenario. Requires a target whose firmware binds the virtual BLE link; returns bad_args otherwise.", "mutating": true, "stability": "stable", "effects": "non_idempotent", "cardinality": "single", "stdout_schema": {"type": "object", "properties": {"ok": {"type": "boolean"}, "secure": {"type": "boolean"}, "passkey": {"type": "integer"}, "replies": {"type": "array"}, "items": {"type": "array"}}},
       "args": [
         { "name": "sub", "description": "connect|pair|disconnect|send|recv|hid.", "type": "string", "required": true, "enum": ["connect", "pair", "disconnect", "send", "recv", "hid"] },
         { "name": "json", "description": "For send: one JSON line for the device.", "type": "string", "required": false }
       ],
-      "example": { "args": ["send", "{\"cmd\":\"status\"}", "--target", "<ble-firmware-target>"], "stdin": "" },
-      "output_fields": [
-        { "name": "ok", "description": "Delivered.", "type": "boolean" },
-        { "name": "replies", "description": "For send: JSON lines the device sent back.", "type": "string" }
-      ] },
-    { "name": "button", "description": "Press a physical button, by semantic name or by the board's silk-screen label (case-insensitive; see list-targets buttons). pwr-long and pwr-release inject the power button's long-press and release edges for hold gestures (advance time with steps between them). On agent-capable qemu targets a labeled GPIO button pulses its pin through the guest input agent.", "mutating": true, "stability": "stable",
+      "example": { "args": ["send", "{\"cmd\":\"status\"}", "--target", "<ble-firmware-target>"], "stdin": "" } },
+    { "name": "button", "description": "Press a physical button, by semantic name or by the board's silk-screen label (case-insensitive; see list-targets buttons). pwr-long and pwr-release inject the power button's long-press and release edges for hold gestures (advance time with steps between them). On agent-capable qemu targets a labeled GPIO button pulses its pin through the guest input agent.", "mutating": true, "stability": "stable", "effects": "non_idempotent", "cardinality": "single", "output_fields": [{"name": "ok", "type": "boolean"}],
       "args": [ { "name": "which", "description": "primary|secondary|pwr|pwr-long|pwr-release or a board button label (e.g. BOOT).", "type": "string", "required": true } ],
       "example": { "args": ["primary", "--target", "waveshare_amoled_18"], "stdin": "" } },
-    { "name": "serial", "description": "serial send TEXT feeds device input; serial expect REGEX matches captured output (exit 1 on no match).", "mutating": false, "stability": "stable",
+    { "name": "serial", "description": "serial send TEXT feeds device input; serial expect REGEX matches captured output (exit 1 on no match).", "mutating": true, "stability": "stable", "effects": "non_idempotent", "cardinality": "single", "stdout_schema": {"oneOf": [{"type": "object", "required": ["ok"], "properties": {"ok": {"type": "boolean"}}}, {"type": "object", "required": ["matched"], "properties": {"matched": {"type": "boolean"}}}]}, "outcomes": ["no_match"],
       "args": [
         { "name": "sub", "description": "send or expect.", "type": "string", "required": true, "enum": ["send", "expect"] },
         { "name": "arg", "description": "Text to send, or regex to expect.", "type": "string", "required": true }
       ],
       "example": { "args": ["expect", "ready", "--target", "waveshare_amoled_18"], "stdin": "" } },
-    { "name": "logs", "description": "Print captured device serial output.", "mutating": false, "stability": "stable",
+    { "name": "logs", "description": "Print captured device serial output.", "mutating": true, "stability": "stable", "effects": "non_idempotent", "cardinality": "single",
       "example": { "args": ["--target", "waveshare_amoled_18"], "stdin": "" },
       "output_fields": [ { "name": "serial", "description": "Captured serial text.", "type": "string" } ] },
-    { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless, on native and qemu targets. Steps: snapshot, screenshot, steps (native-only), settle {ms} (portable time), pixel {x,y,value,timeout_ms} (framebuffer assertion with a retry deadline; the emulator golden primitive), battery, button, tap, swipe, expect (native-only; use pixel/serial on qemu), rotate, motion, serial {expect,absent}, gpio, wifi, ble. Steps needing a capability the target lacks fail individually with unsupported.", "mutating": true, "stability": "stable",
+    { "name": "scenario", "description": "Run a JSON scenario file (ordered steps) headless, on native and qemu targets. Steps: snapshot, screenshot, steps (native-only), settle {ms} (portable time), pixel {x,y,value,timeout_ms} (framebuffer assertion with a retry deadline; the emulator golden primitive), battery, button, tap, swipe, expect (native-only; use pixel/serial on qemu), rotate, motion, serial {expect,absent}, gpio, wifi, ble. Steps needing a capability the target lacks fail individually with unsupported.", "mutating": true, "stability": "stable", "effects": "non_idempotent", "cardinality": "single", "output_fields": [{"name": "ok", "type": "boolean"}],
       "args": [ { "name": "file", "description": "Scenario JSON path.", "type": "string", "required": true } ] },
-    { "name": "serve", "description": "Boot and keep pumping so a live bridge can drive the device. HTTP: a bridge POSTs to the firmware's webserver (--port). BLE: --ble-port N exposes the virtual BLE link as newline-delimited JSON on a localhost TCP socket (connect = bonded central, lines in = host->device, device lines stream back; one client at a time). --window opens an interactive device-bezel window (mouse=touch, clickable board buttons with hover tooltips, ? for help, and a backtick-opened hardware panel with battery/USB/rotate controls on boards that have them). Human logs on stderr. On a qemu-backed target, serve boots and pumps serial I/O until interrupted; there is no HTTP webserver or native BLE link, so --ble-port is rejected as unsupported. When the qemu target's board spec declares a display, --shot and --window mirror the guest panel via QMP screendump (10 Hz for the window); on a display-less qemu target they are rejected as unsupported (see the backend field on list-targets).", "mutating": true, "stability": "stable" },
-    { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), swipe (x1,y1,x2,y2), expect (text/absent/match), button, battery, rotate, motion, gpio, wifi, ble (sub+data/passkey), snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable" }
+    { "name": "serve", "description": "Boot and keep pumping so a live bridge can drive the device. HTTP: a bridge POSTs to the firmware's webserver (--port). BLE: --ble-port N exposes the virtual BLE link as newline-delimited JSON on a localhost TCP socket (connect = bonded central, lines in = host->device, device lines stream back; one client at a time). --window opens an interactive device-bezel window (mouse=touch, clickable board buttons with hover tooltips, ? for help, and a backtick-opened hardware panel with battery/USB/rotate controls on boards that have them). Human logs on stderr. On a qemu-backed target, serve boots and pumps serial I/O until interrupted; there is no HTTP webserver or native BLE link, so --ble-port is rejected as unsupported. When the qemu target's board spec declares a display, --shot and --window mirror the guest panel via QMP screendump (10 Hz for the window); on a display-less qemu target they are rejected as unsupported (see the backend field on list-targets).", "mutating": true, "stability": "stable", "effects": "non_idempotent", "output_kind": "opaque", "media_type": "text/plain" },
+    { "name": "run", "description": "Persistent agent session: newline-delimited JSON commands on stdin, one JSON reply per line. cmds: boot, ui, tap (ref|x,y), swipe (x1,y1,x2,y2), expect (text/absent/match), button, battery, rotate, motion, gpio, wifi, ble (sub+data/passkey), snapshot, screenshot, steps, serial, logs, quit. One boot per session (a second boot replies already_booted). Error replies use {\"error\":{\"kind\":...,\"message\":...}} with the kinds from errors, plus not_booted and already_booted. Refs from ui stay valid within the session.", "mutating": true, "stability": "stable", "effects": "non_idempotent", "output_kind": "stream", "stream_format": "ndjson", "stdout_schema": {"type": "object"} }
   ],
   "errors": [
     { "kind": "no_target", "description": "No --target and more than one target registered.", "exit_code": 2 },
@@ -454,6 +453,32 @@ static void set_output_mode(int argc, char** argv) {
 static void emit(const std::string& json, const std::string& text) {
     printf("%s\n", (g_json ? json : text).c_str());
 }
+static bool field_selected(const char* fields, const char* field) {
+    if (!fields) return true;
+    std::string list(fields);
+    size_t start = 0;
+    do {
+        size_t end = list.find(',', start);
+        if (list.substr(start, end == std::string::npos ? end : end - start) == field) return true;
+        if (end == std::string::npos) break;
+        start = end + 1;
+    } while (start <= list.size());
+    return false;
+}
+static std::string project_array(const std::string& input, const char* fields) {
+    if (!fields) return input;
+    JsonDocument document;
+    deserializeJson(document, input);
+    for (JsonObject item : document.as<JsonArray>()) {
+        std::vector<std::string> remove;
+        for (JsonPair pair : item)
+            if (!field_selected(fields, pair.key().c_str())) remove.emplace_back(pair.key().c_str());
+        for (const auto& key : remove) item.remove(key);
+    }
+    std::string out;
+    serializeJson(document, out);
+    return out;
+}
 // Slice a JSON array-of-objects string by --offset/--limit and wrap it with
 // truncation metadata: {"items":[...],"total","offset","count","truncated"}.
 static std::string bounded_array(const std::string& arr, int offset, int limit) {
@@ -500,16 +525,27 @@ static bool install_qemu_boards_gated(std::string* err) {
 }
 
 int esprite_main(int argc, char** argv) {
+    std::vector<char*> normalized;
+    int command_index = 1;
+    while (command_index < argc) {
+        const char* arg = argv[command_index];
+        if (!strcmp(arg, "--help") || !strcmp(arg, "--version")) break;
+        if (is_val_opt(arg)) {
+            if (command_index + 1 >= argc) return fail("bad_args", std::string(arg) + " needs a value", 2);
+            command_index += 2;
+        } else if (is_flag_opt(arg)) ++command_index;
+        else break;
+    }
+    if (command_index > 1) {
+        if (command_index >= argc) return fail("bad_args", "missing command (see: esprite schema)", 2);
+        normalized.push_back(argv[0]);
+        normalized.push_back(argv[command_index]);
+        for (int i = 1; i < argc; ++i) if (i != command_index) normalized.push_back(argv[i]);
+        argv = normalized.data();
+    }
     g_interrupted = 0;         // each invocation starts fresh; tests call this repeatedly in-process
     install_signal_handlers(); // before qemu_backend_install: a qemu boot's wait loops must see g_interrupted
     qemu_backend_install(sim_interrupted);   // core never links qemu code directly; this is the one wiring point
-    {
-        // Register the data-driven qemu targets (embedded targets/qemu/*.json
-        // plus an optional ESPRITE_QEMU_BOARD user file) before any target
-        // resolution. Idempotent across repeated in-process calls.
-        std::string board_err;
-        if (!install_qemu_boards_gated(&board_err)) return fail("bad_args", board_err, 2);
-    }
     BackendShutdownGuard backend_guard;
     set_output_mode(argc, argv);
     if (argc < 2 || !strcmp(argv[1], "--help") || !strcmp(argv[1], "help")) {
@@ -527,12 +563,19 @@ int esprite_main(int argc, char** argv) {
     if (opt_flag(argc, argv, "--help")) { printf("%s\n", kSchema.c_str()); return 0; }
     if (int rc = validate_options(argc, argv)) return rc;
 
+    {
+        // Register the data-driven qemu targets (embedded targets/qemu/*.json
+        // plus an optional ESPRITE_QEMU_BOARD user file) before any target
+        // resolution. Idempotent across repeated in-process calls.
+        std::string board_err;
+        if (!install_qemu_boards_gated(&board_err)) return fail("bad_args", board_err, 2);
+    }
     if (cmd == "list-targets") {
         int offset = opt_val(argc, argv, "--offset") ? atoi(opt_val(argc, argv, "--offset")) : 0;
-        int limit  = opt_val(argc, argv, "--limit")  ? atoi(opt_val(argc, argv, "--limit"))  : -1;
+        int limit  = opt_val(argc, argv, "--limit")  ? atoi(opt_val(argc, argv, "--limit"))  : 100;
         if (offset < 0) offset = 0;   // never index the registry out of bounds
         const char* fields = opt_val(argc, argv, "--fields");
-        auto want = [&](const char* f) { return !fields || strstr(fields, f) != nullptr; };
+        auto want = [&](const char* f) { return field_selected(fields, f); };
         int total = sim_target_count();
         std::string json = "{\"items\":[", text;
         int shown = 0;
@@ -584,7 +627,9 @@ int esprite_main(int argc, char** argv) {
         // scenario_run boots through the backend seam and gates per step, so
         // qemu targets run scenarios too (steps needing the native surface
         // fail with unsupported individually).
-        return scenario_run(file, effective);
+        int result = scenario_run(file, effective);
+        if (result == 0) emit("{\"ok\":true}", "scenario passed");
+        return result;
     }
 
     if (cmd == "serve") {
@@ -762,10 +807,10 @@ int esprite_main(int argc, char** argv) {
 
     if (cmd == "ui") {
         // Snapshot-ref model: the LVGL widget tree of the current screen. Bounded
-        // by --offset/--limit; --fields not applied (elements are already compact).
+        // by --offset/--limit and projected by exact --fields names.
         int offset = opt_val(argc, argv, "--offset") ? atoi(opt_val(argc, argv, "--offset")) : 0;
-        int limit  = opt_val(argc, argv, "--limit")  ? atoi(opt_val(argc, argv, "--limit"))  : -1;
-        std::string tree = lvgl_snapshot_json();
+        int limit  = opt_val(argc, argv, "--limit")  ? atoi(opt_val(argc, argv, "--limit"))  : 100;
+        std::string tree = project_array(lvgl_snapshot_json(), opt_val(argc, argv, "--fields"));
         emit(bounded_array(tree, offset, limit), tree);
         return 0;
     }
@@ -785,6 +830,7 @@ int esprite_main(int argc, char** argv) {
         if (!sim_backend().sync_framebuffer(&sync_err))
             return fail("capture_failed", "could not capture the display: " + sync_err, 9);
         bool ok = sim_screenshot_png(out.c_str());
+        if (!ok) return fail("capture_failed", "could not write PNG to " + out, 9);
         int w = sim_framebuffer().w(), h = sim_framebuffer().h();
         emit("{\"ok\":" + std::string(jbool(ok)) + ",\"path\":\"" + json_esc(out) + "\",\"w\":" +
              std::to_string(w) + ",\"h\":" + std::to_string(h) + "}",
